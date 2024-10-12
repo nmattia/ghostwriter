@@ -4,14 +4,18 @@
 #![no_main]
 
 use bsp::entry;
-use embedded_hal::digital::{InputPin, OutputPin};
+use embedded_hal::digital::OutputPin;
 use panic_halt as _;
 
 // Device specific
 use pimoroni_tiny2040 as bsp;
 
 use bsp::hal;
-use bsp::hal::{clocks::Clock, pac, pac::interrupt};
+use bsp::hal::{clocks::Clock, gpio, pac, pac::interrupt};
+
+// Locking
+use core::cell::RefCell;
+use critical_section::Mutex;
 
 // USB Device support
 use usb_device::{class_prelude::*, prelude::*};
@@ -29,6 +33,18 @@ static mut USB_BUS: Option<UsbBusAllocator<hal::usb::UsbBus>> = None;
 
 /// The USB Human Interface Device Driver (shared with the interrupt).
 static mut USB_HID: Option<HIDClass<hal::usb::UsbBus>> = None;
+
+/// The pin used as an input button
+static CLICK_BUTTON: Mutex<RefCell<Option<ClickButtonPin>>> = Mutex::new(RefCell::new(None));
+
+/// The global state
+/// FIXME: the interrupt triggers once at the start (it seems) so we flip the initial value
+static G_STATE: Mutex<RefCell<State>> = Mutex::new(RefCell::new(true));
+
+type State = bool; // true: show green and type; false: show red and don't type
+
+type ClickButtonPin =
+    gpio::Pin<gpio::bank0::Gpio23, gpio::FunctionSio<gpio::SioInput>, gpio::PullUp>;
 
 /// Entry point to our bare-metal application.
 ///
@@ -66,7 +82,15 @@ fn main() -> ! {
     );
 
     // Our button input
-    let mut button_pin = pins.bootsel.into_pull_up_input();
+    let button_pin: ClickButtonPin = pins.bootsel.into_pull_up_input();
+
+    // Trigger on the 'falling edge' of the input pin.
+    // This will happen as the button is being pressed
+    button_pin.set_interrupt_enabled(gpio::Interrupt::EdgeLow, true);
+
+    critical_section::with(|cs| {
+        CLICK_BUTTON.borrow(cs).replace(Some(button_pin));
+    });
 
     // Set up the USB driver
     let usb_bus = UsbBusAllocator::new(hal::usb::UsbBus::new(
@@ -113,12 +137,14 @@ fn main() -> ! {
     unsafe {
         // Enable the USB interrupt
         pac::NVIC::unmask(hal::pac::Interrupt::USBCTRL_IRQ);
+
+        // Enable the button click interrupt
+        pac::NVIC::unmask(pac::Interrupt::IO_IRQ_BANK0);
     };
+
     let core = pac::CorePeripherals::take().unwrap();
     let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
 
-    let mut on = false;
-    let mut was_pressed = false;
     let mut n_written: usize = 0;
 
     // Initialization is done, turn on a green light
@@ -129,17 +155,27 @@ fn main() -> ! {
     let mut led_blue = pins.led_blue.into_push_pull_output();
     led_blue.set_high().unwrap();
 
-    // Move the cursor up and down every 200ms
+    // Main loop
     loop {
-        // TODO: use interrupt
-        let is_pressed = button_pin.is_low().unwrap();
+        // Check the state
+        let on: bool = critical_section::with(|cs| {
+            let f = G_STATE.borrow(cs).borrow();
+            f.clone()
+        });
 
-        if was_pressed && !is_pressed {
-            on = !on;
+        // Turn off all LEDs
+        led_red.set_high().unwrap();
+        led_green.set_high().unwrap();
+        led_blue.set_high().unwrap();
+
+        // Show state
+        if on {
+            led_green.set_low().unwrap();
+        } else {
+            led_red.set_low().unwrap();
         }
 
-        was_pressed = is_pressed;
-
+        // Apply state (USB stuff)
         let c = if !on {
             0x00
         } else {
@@ -155,16 +191,16 @@ fn main() -> ! {
             leds: 0,
             keycodes: [c, 0, 0, 0, 0, 0],
         };
-
-        push_hid_report(rep_down).ok().unwrap_or(0);
-
-        delay.delay_ms(50);
         let rep_up = KeyboardReport {
             modifier: 0,
             reserved: 0,
             leds: 0,
             keycodes: [0x00, 0, 0, 0, 0, 0],
         };
+
+        push_hid_report(rep_down).ok().unwrap_or(0);
+
+        delay.delay_ms(50);
         push_hid_report(rep_up).ok().unwrap_or(0);
         delay.delay_ms(100);
     }
@@ -260,11 +296,37 @@ fn push_hid_report(report: KeyboardReport) -> Result<usize, usb_device::UsbError
 
 /// This function is called whenever the USB Hardware generates an Interrupt
 /// Request.
-#[allow(non_snake_case)]
 #[interrupt]
 unsafe fn USBCTRL_IRQ() {
     // Handle USB request
     let usb_dev = USB_DEVICE.as_mut().unwrap();
     let usb_hid = USB_HID.as_mut().unwrap();
     usb_dev.poll(&mut [usb_hid]);
+}
+
+/// BUTTON
+
+#[interrupt]
+fn IO_IRQ_BANK0() {
+    // The `#[interrupt]` attribute covertly converts this to `&'static mut Option<LedAndButton>`
+    static mut BUTTON: Option<ClickButtonPin> = None;
+
+    // This is one-time lazy initialisation. We steal the variables given to us
+    // via `GLOBAL_PINS`.
+    if BUTTON.is_none() {
+        critical_section::with(|cs| {
+            *BUTTON = CLICK_BUTTON.borrow(cs).take();
+        });
+    }
+
+    if let Some(button) = BUTTON {
+        if button.interrupt_status(gpio::Interrupt::EdgeLow) {
+            button.clear_interrupt(gpio::Interrupt::EdgeLow);
+        }
+    }
+
+    critical_section::with(|cs| {
+        let old: bool = G_STATE.borrow(cs).borrow().clone();
+        G_STATE.borrow(cs).replace(!old);
+    });
 }
