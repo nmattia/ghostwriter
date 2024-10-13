@@ -4,7 +4,6 @@
 #![no_main]
 
 use bsp::entry;
-use embedded_hal::digital::OutputPin;
 use panic_halt as _;
 
 // Device specific
@@ -25,6 +24,7 @@ use usbd_hid::descriptor::generator_prelude::*;
 use usbd_hid::descriptor::KeyboardReport;
 use usbd_hid::hid_class::HIDClass;
 
+mod leds;
 mod text;
 
 /// The USB Device Driver (shared with the interrupt).
@@ -81,6 +81,12 @@ fn main() -> ! {
         pac.PADS_BANK0,
         sio.gpio_bank0,
         &mut pac.RESETS,
+    );
+
+    let mut led_channels = leds::init_pwm(
+        pac.PWM,
+        &mut pac.RESETS,
+        (pins.led_red, pins.led_green, pins.led_blue),
     );
 
     // Our button input
@@ -149,14 +155,6 @@ fn main() -> ! {
 
     let mut n_written: usize = 0;
 
-    // Initialization is done, turn on a green light
-    let mut led_green = pins.led_green.into_push_pull_output();
-    led_green.set_low().unwrap();
-    let mut led_red = pins.led_red.into_push_pull_output();
-    led_red.set_high().unwrap();
-    let mut led_blue = pins.led_blue.into_push_pull_output();
-    led_blue.set_high().unwrap();
-
     // Main loop
     loop {
         // Check the state
@@ -165,16 +163,11 @@ fn main() -> ! {
             f.clone()
         });
 
-        // Turn off all LEDs
-        led_red.set_high().unwrap();
-        led_green.set_high().unwrap();
-        led_blue.set_high().unwrap();
-
         // Show state
         if on {
-            led_green.set_low().unwrap();
+            led_channels.green();
         } else {
-            led_red.set_low().unwrap();
+            led_channels.red();
         }
 
         // Apply state (USB stuff)
