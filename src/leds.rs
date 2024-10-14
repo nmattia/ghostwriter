@@ -1,6 +1,11 @@
 use bsp::hal::pwm;
 use bsp::hal::pwm::Slice;
-use bsp::hal::{gpio, pac};
+use bsp::hal::{
+    gpio,
+    gpio::bank0::{Gpio18, Gpio19, Gpio20},
+    gpio::{FunctionNull, PullDown},
+    pac,
+};
 use pimoroni_tiny2040 as bsp;
 
 // Module driving LEDs through PWM.
@@ -52,9 +57,9 @@ impl LEDChannels {
 }
 
 type LEDPins = (
-    gpio::Pin<gpio::bank0::Gpio18, gpio::FunctionNull, gpio::PullDown>,
-    gpio::Pin<gpio::bank0::Gpio19, gpio::FunctionNull, gpio::PullDown>,
-    gpio::Pin<gpio::bank0::Gpio20, gpio::FunctionNull, gpio::PullDown>,
+    gpio::Pin<Gpio18, FunctionNull, PullDown>,
+    gpio::Pin<Gpio19, FunctionNull, PullDown>,
+    gpio::Pin<Gpio20, FunctionNull, PullDown>,
 );
 
 pub fn init_pwm(pwm: pac::PWM, resets: &mut pac::RESETS, led_pins: LEDPins) -> LEDChannels {
@@ -70,9 +75,9 @@ pub fn init_pwm(pwm: pac::PWM, resets: &mut pac::RESETS, led_pins: LEDPins) -> L
     pwm2.set_top(PWM_TOP);
 
     // NOTE: we 'unwrap' because the error is actually Infallibe
-    pwm1.channel_a.set_duty_cycle(u16::MAX).unwrap();
-    pwm1.channel_b.set_duty_cycle(u16::MAX).unwrap();
-    pwm2.channel_a.set_duty_cycle(u16::MAX).unwrap();
+    pwm1.channel_a.set_duty_cycle_fully_on().unwrap();
+    pwm1.channel_b.set_duty_cycle_fully_on().unwrap();
+    pwm2.channel_a.set_duty_cycle_fully_on().unwrap();
 
     pwm1.channel_a.output_to(led_pins.0);
     pwm1.channel_b.output_to(led_pins.1);
