@@ -41,18 +41,13 @@ pub struct LEDChannels {
 
 impl LEDChannels {
     // NOTE: duty "on/off" is inverted because LEDs are active low
-    // NOTE: we 'unwrap' because the error is actually Infallibe
+    // NOTE: we 'unwrap' because the error is actually Infallible
 
-    pub fn green(&mut self) {
-        self.red.set_duty_cycle_fully_on().unwrap();
-        self.green.set_duty_cycle_fully_off().unwrap();
-        self.blue.set_duty_cycle_fully_on().unwrap();
-    }
-
-    pub fn red(&mut self) {
-        self.red.set_duty_cycle_fully_off().unwrap();
-        self.green.set_duty_cycle_fully_on().unwrap();
-        self.blue.set_duty_cycle_fully_on().unwrap();
+    pub fn set_rgb(&mut self, r: f64, g: f64, b: f64) {
+        let convert = |v: f64| ((1.0 - v) * 100.0) as u8;
+        self.red.set_duty_cycle_percent(convert(r)).unwrap();
+        self.green.set_duty_cycle_percent(convert(g)).unwrap();
+        self.blue.set_duty_cycle_percent(convert(b)).unwrap();
     }
 }
 
@@ -74,7 +69,7 @@ pub fn init_pwm(pwm: pac::PWM, resets: &mut pac::RESETS, led_pins: LEDPins) -> L
     pwm1.set_top(PWM_TOP);
     pwm2.set_top(PWM_TOP);
 
-    // NOTE: we 'unwrap' because the error is actually Infallibe
+    // NOTE: we 'unwrap' because the error is actually Infallible
     pwm1.channel_a.set_duty_cycle_fully_on().unwrap();
     pwm1.channel_b.set_duty_cycle_fully_on().unwrap();
     pwm2.channel_a.set_duty_cycle_fully_on().unwrap();

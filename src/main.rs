@@ -10,7 +10,7 @@ use panic_halt as _;
 use pimoroni_tiny2040 as bsp;
 
 use bsp::hal;
-use bsp::hal::{clocks::Clock, gpio, pac, pac::interrupt};
+use bsp::hal::{gpio, pac, pac::interrupt};
 
 // Locking
 use core::cell::RefCell;
@@ -23,6 +23,12 @@ use usb_device::{class_prelude::*, prelude::*};
 use usbd_hid::descriptor::generator_prelude::*;
 use usbd_hid::descriptor::KeyboardReport;
 use usbd_hid::hid_class::HIDClass;
+
+use core::pin::{pin, Pin};
+use futures::task::{noop_waker, Context, Poll};
+use futures::Future;
+
+use libm;
 
 mod leds;
 mod text;
@@ -83,7 +89,7 @@ fn main() -> ! {
         &mut pac.RESETS,
     );
 
-    let mut led_channels = leds::init_pwm(
+    let led_channels = leds::init_pwm(
         pac.PWM,
         &mut pac.RESETS,
         (pins.led_red, pins.led_green, pins.led_blue),
@@ -100,11 +106,15 @@ fn main() -> ! {
         CLICK_BUTTON.borrow(cs).replace(Some(button_pin));
     });
 
+    // Prepare timer
+    let timer = hal::Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
+
     // Set up the USB driver
+    let usb_clock = clocks.usb_clock;
     let usb_bus = UsbBusAllocator::new(hal::usb::UsbBus::new(
         pac.USBCTRL_REGS,
         pac.USBCTRL_DPRAM,
-        clocks.usb_clock,
+        usb_clock,
         true,
         &mut pac.RESETS,
     ));
@@ -150,25 +160,104 @@ fn main() -> ! {
         pac::NVIC::unmask(pac::Interrupt::IO_IRQ_BANK0);
     };
 
-    let core = pac::CorePeripherals::take().unwrap();
-    let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
+    run(timer, led_channels)
+}
 
-    let mut n_written: usize = 0;
+// Duration
+type Duration = hal::fugit::Duration<u64, 1, 1000000>;
 
-    // Main loop
+// Async/await sleep
+pub struct Sleep<'a> {
+    target: Duration,
+    timer: &'a hal::Timer,
+}
+impl Future for Sleep<'_> {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, _ctx: &mut Context<'_>) -> Poll<Self::Output> {
+        let now: Duration = self.timer.get_counter().duration_since_epoch();
+
+        if self.target < now {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
+    }
+}
+
+// Wrapper around timer so that poll knows the time
+struct Scheduler<'a> {
+    timer: &'a hal::Timer,
+}
+
+impl<'a> Scheduler<'a> {
+    fn sleep_ms(self: &Self, v: u64) -> Sleep<'a> {
+        let now: Duration = self.timer.get_counter().duration_since_epoch();
+        let delta: Duration = Duration::millis(v);
+        Sleep {
+            target: now + delta,
+            timer: &self.timer,
+        }
+    }
+}
+
+// Future executor that loops through all futures and polls them consistently.
+pub fn run(timer: hal::Timer, led_channels: leds::LEDChannels) -> ! {
+    let scheduler = Scheduler { timer: &timer };
+
+    let handle_leds = handle_leds(&scheduler, led_channels);
+    let mut handle_leds = pin!(handle_leds);
+
+    let handle_usb = handle_usb(&scheduler);
+    let mut handle_usb = pin!(handle_usb);
+
+    let waker = noop_waker();
+    let mut ctx = Context::from_waker(&waker);
+
     loop {
-        // Check the state
+        let _: Poll<()> = handle_leds.as_mut().poll(&mut ctx);
+        let _: Poll<()> = handle_usb.as_mut().poll(&mut ctx);
+    }
+}
+
+/// Animate the LEDs based on the state
+async fn handle_leds<'a>(scheduler: &Scheduler<'a>, mut led_channels: leds::LEDChannels) {
+    let mut set = |elapsed_millis: f64| {
+        const TAU: f64 = 2.0 * core::f64::consts::PI;
+
+        let on = critical_section::with(|cs| G_STATE.borrow(cs).borrow().clone());
+
+        // Period of a blink
+        let period_millis = if on { 1000.0 } else { 2000.0 };
+
+        // How far we are in one blink
+        let x = elapsed_millis / period_millis;
+
+        // Sine waveform, shifted to [+1, -1]
+        let x = 0.5 * libm::sin(x * TAU) + 0.5;
+
+        led_channels.set_rgb(x / 10.0, x / 10.0, x / 2.0);
+    };
+
+    // Approximate elapsed time
+    let mut elapsed_millis: f64 = 0.0;
+
+    const DELAY_MILLIS: u64 = 50;
+
+    loop {
+        set(elapsed_millis);
+        scheduler.sleep_ms(DELAY_MILLIS).await;
+        elapsed_millis += DELAY_MILLIS as f64;
+    }
+}
+
+async fn handle_usb<'a>(scheduler: &Scheduler<'a>) {
+    let mut n_written: usize = 0;
+    loop {
         let on: bool = critical_section::with(|cs| {
             let f = G_STATE.borrow(cs).borrow();
             f.clone()
         });
-
-        // Show state
-        if on {
-            led_channels.green();
-        } else {
-            led_channels.red();
-        }
 
         // Apply state (USB stuff)
         let c = if !on {
@@ -195,9 +284,9 @@ fn main() -> ! {
 
         push_hid_report(rep_down).ok().unwrap_or(0);
 
-        delay.delay_ms(50);
+        scheduler.sleep_ms(50).await;
         push_hid_report(rep_up).ok().unwrap_or(0);
-        delay.delay_ms(100);
+        scheduler.sleep_ms(100).await;
     }
 }
 
