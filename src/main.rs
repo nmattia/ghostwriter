@@ -296,7 +296,7 @@ async fn handle_leds<'a>(
         let on = critical_section::with(|cs| state.borrow(cs).borrow().clone());
 
         // Period of a blink
-        let period_millis = if on { 1000.0 } else { 2000.0 };
+        let period_millis = if on { 1000.0 } else { 3000.0 };
 
         // How far we are in one blink
         let x = elapsed_millis / period_millis;
@@ -304,7 +304,12 @@ async fn handle_leds<'a>(
         // Sine waveform, shifted to [+1, -1]
         let x = 0.5 * libm::sin(x * TAU) + 0.5;
 
-        led_channels.set_rgb(x / 3.0, x / 10.0, x);
+        if on {
+            led_channels.set_rgb(x / 1.0, x / 9.0, x);
+        } else {
+            led_channels.set_rgb(x /3.0, x/5.0 , x/4.0);
+
+        }
     };
 
     // Approximate elapsed time
