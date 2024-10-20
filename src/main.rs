@@ -236,7 +236,7 @@ async fn handle_leds<'a>(scheduler: &Scheduler<'a>, mut led_channels: leds::LEDC
         // Sine waveform, shifted to [+1, -1]
         let x = 0.5 * libm::sin(x * TAU) + 0.5;
 
-        led_channels.set_rgb(x / 10.0, x / 10.0, x / 2.0);
+        led_channels.set_rgb(x / 3.0, x / 10.0, x);
     };
 
     // Approximate elapsed time
