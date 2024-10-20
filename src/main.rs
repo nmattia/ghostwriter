@@ -42,17 +42,16 @@ static mut USB_BUS: Option<UsbBusAllocator<hal::usb::UsbBus>> = None;
 /// The USB Human Interface Device Driver (shared with the interrupt).
 static mut USB_HID: Option<HIDClass<hal::usb::UsbBus>> = None;
 
-/// The pin used as an input button
-static CLICK_BUTTON: Mutex<RefCell<Option<ClickButtonPin>>> = Mutex::new(RefCell::new(None));
+/// The pin used as an input button. Global value set once by the setup, and then read
+/// once (stolen, taken) from the button interrupt handler.
+static _BUTTON_PIN: Mutex<RefCell<Option<ButtonPin>>> = Mutex::new(RefCell::new(None));
 
-/// The global state
-/// FIXME: the interrupt triggers once at the start (it seems) so we flip the initial value
-static G_STATE: Mutex<RefCell<State>> = Mutex::new(RefCell::new(true));
+/// Global state shared between the eventloop and the button interrupt handler.
+static BUTTON_DOWN: Mutex<RefCell<State>> = Mutex::new(RefCell::new(false));
 
-type State = bool; // true: show green and type; false: show red and don't type
+type State = bool; // true: currently running, false: not running
 
-type ClickButtonPin =
-    gpio::Pin<gpio::bank0::Gpio23, gpio::FunctionSio<gpio::SioInput>, gpio::PullUp>;
+type ButtonPin = gpio::Pin<gpio::bank0::Gpio23, gpio::FunctionSio<gpio::SioInput>, gpio::PullUp>;
 
 /// Entry point to our bare-metal application.
 ///
@@ -96,14 +95,15 @@ fn main() -> ! {
     );
 
     // Our button input
-    let button_pin: ClickButtonPin = pins.bootsel.into_pull_up_input();
+    let button_pin: ButtonPin = pins.bootsel.into_pull_up_input();
 
     // Trigger on the 'falling edge' of the input pin.
     // This will happen as the button is being pressed
     button_pin.set_interrupt_enabled(gpio::Interrupt::EdgeLow, true);
 
     critical_section::with(|cs| {
-        CLICK_BUTTON.borrow(cs).replace(Some(button_pin));
+        _BUTTON_PIN.borrow(cs).replace(Some(button_pin));
+        BUTTON_DOWN.borrow(cs).replace(false);
     });
 
     // Prepare timer
@@ -171,6 +171,7 @@ pub struct Sleep<'a> {
     target: Duration,
     timer: &'a hal::Timer,
 }
+
 impl Future for Sleep<'_> {
     type Output = ();
 
@@ -179,6 +180,29 @@ impl Future for Sleep<'_> {
 
         if self.target < now {
             Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
+    }
+}
+
+/// Async/await waiting for user input (button press)
+pub struct Input {}
+
+impl Future for Input {
+    type Output = bool;
+
+    fn poll(self: Pin<&mut Self>, _ctx: &mut Context<'_>) -> Poll<Self::Output> {
+        let was_pressed = critical_section::with(|cs| {
+            // Check if button has been pressed
+            let was_pressed: bool = BUTTON_DOWN.borrow(cs).borrow().clone();
+            BUTTON_DOWN.borrow(cs).replace(false);
+            was_pressed
+        });
+
+        // If the button was pressed, we're ready to continue
+        if was_pressed {
+            Poll::Ready(true)
         } else {
             Poll::Pending
         }
@@ -199,17 +223,34 @@ impl<'a> Scheduler<'a> {
             timer: &self.timer,
         }
     }
+
+    fn wait_for_press(self: &Self) -> Input {
+        Input {}
+    }
+
+    fn now(self: &Self) -> Duration {
+        self.timer.get_counter().duration_since_epoch()
+    }
 }
 
 // Future executor that loops through all futures and polls them consistently.
 pub fn run(timer: hal::Timer, led_channels: leds::LEDChannels) -> ! {
     let scheduler = Scheduler { timer: &timer };
 
-    let handle_leds = handle_leds(&scheduler, led_channels);
+    // The global state
+    // NOTE: the interrupt triggers once at the start (it seems) but because the input handler
+    // has some debouncing (computed from epoch) this doesn't matter and the "press" is not
+    // registered.
+    let state: Mutex<RefCell<State>> = Mutex::new(RefCell::new(false));
+
+    let handle_leds = handle_leds(&scheduler, &state, led_channels);
     let mut handle_leds = pin!(handle_leds);
 
-    let handle_usb = handle_usb(&scheduler);
+    let handle_usb = handle_usb(&scheduler, &state);
     let mut handle_usb = pin!(handle_usb);
+
+    let handle_input = handle_input(&scheduler, &state);
+    let mut handle_input = pin!(handle_input);
 
     let waker = noop_waker();
     let mut ctx = Context::from_waker(&waker);
@@ -217,15 +258,42 @@ pub fn run(timer: hal::Timer, led_channels: leds::LEDChannels) -> ! {
     loop {
         let _: Poll<()> = handle_leds.as_mut().poll(&mut ctx);
         let _: Poll<()> = handle_usb.as_mut().poll(&mut ctx);
+        let _: Poll<()> = handle_input.as_mut().poll(&mut ctx);
+    }
+}
+
+async fn handle_input<'a>(scheduler: &Scheduler<'a>, state: &Mutex<RefCell<State>>) {
+    // Memory of the last (registered, acknowledged) press, needed for debouncing
+    let mut last_press: Duration = Duration::secs(0);
+    loop {
+        scheduler.wait_for_press().await;
+
+        // If the last press occurred in the last few moments (and technically within
+        // the first few moments after boot), pretend this current press didn't happen.
+        let now = scheduler.now();
+        if now.to_millis() - last_press.to_millis() < 300 {
+            continue;
+        }
+        last_press = now;
+
+        // Button was pressed, so flip the state.
+        critical_section::with(|cs| {
+            let old: bool = state.borrow(cs).borrow().clone();
+            state.borrow(cs).replace(!old);
+        });
     }
 }
 
 /// Animate the LEDs based on the state
-async fn handle_leds<'a>(scheduler: &Scheduler<'a>, mut led_channels: leds::LEDChannels) {
+async fn handle_leds<'a>(
+    scheduler: &Scheduler<'a>,
+    state: &Mutex<RefCell<State>>,
+    mut led_channels: leds::LEDChannels,
+) {
     let mut set = |elapsed_millis: f64| {
         const TAU: f64 = 2.0 * core::f64::consts::PI;
 
-        let on = critical_section::with(|cs| G_STATE.borrow(cs).borrow().clone());
+        let on = critical_section::with(|cs| state.borrow(cs).borrow().clone());
 
         // Period of a blink
         let period_millis = if on { 1000.0 } else { 2000.0 };
@@ -251,11 +319,11 @@ async fn handle_leds<'a>(scheduler: &Scheduler<'a>, mut led_channels: leds::LEDC
     }
 }
 
-async fn handle_usb<'a>(scheduler: &Scheduler<'a>) {
+async fn handle_usb<'a>(scheduler: &Scheduler<'a>, state: &Mutex<RefCell<State>>) {
     let mut n_written: usize = 0;
     loop {
         let on: bool = critical_section::with(|cs| {
-            let f = G_STATE.borrow(cs).borrow();
+            let f = state.borrow(cs).borrow();
             f.clone()
         });
 
@@ -292,9 +360,10 @@ async fn handle_usb<'a>(scheduler: &Scheduler<'a>) {
 
 /// USB
 
-/// Submit a new mouse movement report to the USB stack.
+/// Submit a new HID report to the USB stack.
 ///
-/// We do this with interrupts disabled, to avoid a race hazard with the USB IRQ.
+/// We do this with interrupts disabled (critical_section), to avoid a race hazard
+/// with the USB IRQ.
 fn push_hid_report(report: KeyboardReport) -> Result<usize, usb_device::UsbError> {
     critical_section::with(|_| unsafe {
         // Now interrupts are disabled, grab the global variable and, if
@@ -318,25 +387,22 @@ unsafe fn USBCTRL_IRQ() {
 
 #[interrupt]
 fn IO_IRQ_BANK0() {
-    // The `#[interrupt]` attribute covertly converts this to `&'static mut Option<LedAndButton>`
-    static mut BUTTON: Option<ClickButtonPin> = None;
+    // The `#[interrupt]` attribute covertly converts this to `&'static mut Option<...>`
+    static mut BUTTON_PIN: Option<ButtonPin> = None;
 
-    // This is one-time lazy initialisation. We steal the variables given to us
-    // via `GLOBAL_PINS`.
-    if BUTTON.is_none() {
+    // This is one-time lazy initialisation. We steal the global interrupt variables.
+    if BUTTON_PIN.is_none() {
         critical_section::with(|cs| {
-            *BUTTON = CLICK_BUTTON.borrow(cs).take();
+            *BUTTON_PIN = _BUTTON_PIN.borrow(cs).take();
         });
     }
 
-    if let Some(button) = BUTTON {
+    if let Some(button) = BUTTON_PIN {
         if button.interrupt_status(gpio::Interrupt::EdgeLow) {
             button.clear_interrupt(gpio::Interrupt::EdgeLow);
+            critical_section::with(|cs| {
+                BUTTON_DOWN.borrow(cs).replace(true);
+            });
         }
     }
-
-    critical_section::with(|cs| {
-        let old: bool = G_STATE.borrow(cs).borrow().clone();
-        G_STATE.borrow(cs).replace(!old);
-    });
 }
