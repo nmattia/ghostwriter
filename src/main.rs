@@ -307,8 +307,7 @@ async fn handle_leds<'a>(
         if on {
             led_channels.set_rgb(x / 1.0, x / 9.0, x);
         } else {
-            led_channels.set_rgb(x /3.0, x/5.0 , x/4.0);
-
+            led_channels.set_rgb(x / 3.0, x / 5.0, x / 4.0);
         }
     };
 

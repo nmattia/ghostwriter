@@ -24,50 +24,14 @@ pub fn char_to_keycode(chr: u8) -> u8 {
 }
 
 pub const TEXT: &str = "
-chere mobiliere,
+Lorem ipsum odor amet, consectetuer adipiscing elit. Vitae sapien adipiscing sem taciti bibendum aenean platea montes bibendum. Pharetra sem ultrices vitae quis bibendum augue ligula. Nibh fermentum lacinia purus molestie sociosqu felis est. Hendrerit sollicitudin eu sodales ullamcorper eros bibendum morbi. Integer class cursus suscipit commodo tempor nec. Nostra suscipit ipsum semper elementum habitant ultrices posuere. Auctor maximus venenatis turpis vitae enim; dis potenti dictumst. Libero consequat iaculis magna, sollicitudin feugiat praesent tempus.
 
-hier soir, tout semblait parfait. j'avais organise un diner avec mes amis, tout etait pret. mais alors que je sortais le gratin du four, j'ai trebuche sur le tapis... le plat s'est envole, et tout s'est renverse sur le sol, y compris mon tapis prefere. heureusement, avec vous, le nettoyage a ete rapide et efficace. merci de m'avoir aide a sauver ma soiree.
+Nulla sem erat sagittis taciti maximus fusce, at in dis. Fringilla venenatis vestibulum eu nostra inceptos morbi. Rhoncus cubilia adipiscing mauris ex mus montes felis primis. Sed bibendum eleifend senectus gravida; ex pulvinar magnis aptent. Arcu cras sagittis libero penatibus nunc rutrum vestibulum. Habitant class ante semper class dignissim; ante a aenean eu. Arcu suspendisse pellentesque netus bibendum egestas.
 
-chere mobiliere,
+Convallis aenean lectus maecenas mollis at aenean. Litora risus malesuada nullam eu cursus mus mauris mauris vulputate. Erat tincidunt arcu justo interdum proin praesent tempus. Mollis sapien vestibulum ante suspendisse cras primis ligula lectus nam. Dapibus natoque sit gravida dui pellentesque nostra. Mi pulvinar sit; turpis mollis justo leo habitant vestibulum sed.
 
-ce matin, en me reveillant, je me suis dit que c'etait une belle journee pour une balade en velo. tout se passait bien jusqu'a ce qu'un ecureuil decide de traverser devant moi. pour l'eviter, j'ai freine brusquement et me suis retrouve par terre, avec mon velo en morceaux. heureusement, vous avez ete la pour reparer rapidement mon velo, et l'ecureuil s'en est sorti indemne.
+Elit congue scelerisque lectus phasellus consequat lacinia nulla. Hendrerit platea nostra quisque lorem laoreet. Orci nibh felis blandit lacus; vulputate nascetur morbi. Platea metus phasellus habitant, dignissim felis aenean imperdiet. Nascetur nisl mauris elementum auctor mus non ut arcu neque. Morbi egestas curae ultricies eu morbi accumsan lacus vitae. Efficitur lorem sodales pellentesque quisque commodo lacinia augue. Elementum massa hendrerit imperdiet imperdiet varius maecenas.
 
-chere mobiliere,
+Libero quis sociosqu fringilla mauris; praesent fringilla praesent molestie. Consequat tellus cras ullamcorper maecenas inceptos diam pellentesque a cursus. Quam tincidunt conubia primis praesent maximus torquent. Integer dictum senectus tellus porta lacinia maecenas quis potenti. Pretium varius ornare lacus semper nullam ligula, luctus amet! Porttitor auctor eros aliquam ex nibh; dolor semper dapibus. Tincidunt ligula montes vehicula tellus ut habitasse massa.
 
-c'etait un jour comme un autre au bureau, jusqu'a ce que je renverse mon verre d'eau sur l'imprimante. l'appareil a fait un drole de bruit et puis plus rien. la panique s'est installee, surtout avec tous les documents importants a imprimer pour une reunion. heureusement, vous etes venus a la rescousse, et en un rien de temps, l'imprimante etait remplacee. merci pour votre rapidite, vous avez sauve ma journee.
-
-chere mobiliere,
-
-hier, j'avais enfin trouve le temps de laver ma voiture. apres une heure de travail acharné, elle brillait comme jamais. mais juste apres avoir termine, une nuée de pigeons est passee au-dessus de moi... et la voiture. heureusement, vous avez ete la pour m'aider a faire le necessaire. merci, vraiment.
-
-
-chere mobiliere,
-
-ce week-end, j'ai decide de monter un meuble tout seul, sans l'aide des instructions. apres quelques heures de lutte, je me suis retrouve avec une etagere bancale et une vis mysterieuse en trop. le meuble s'est effondre dans la minute. heureusement, vous avez su prendre les choses en main. merci pour votre patience.
-
-chere mobiliere,
-
-c'etait une belle journee de barbecue entre amis. mais lorsque j'ai voulu retourner les brochettes, la grille m'a echappe des mains et tout s'est retrouve par terre. adieu le dejeuner ! heureusement, grace a vous, nous avons pu recommencer sans souci. merci d'avoir sauve notre barbecue.
-
-
-chere mobiliere,
-
-hier soir, alors que je voulais prendre un bain relaxant, j'ai laissé le robinet ouvert un peu trop longtemps. resultat : une salle de bain inondee, avec de l'eau partout. heureusement, vous avez ete la pour m'aider a reparer les degats. merci d'avoir sauve ma soiree de detente.
-
-chere mobiliere,
-
-l'autre jour, en sortant de la douche, j'ai realise que mon peignoir etait tombe du porte-serviettes. j'ai du me depecher de le ramasser en courant dans l'appartement, en esperant que personne ne passe devant la fenetre. heureusement, tout s'est bien termine, et vous m'avez aide a installer un nouveau porte-serviettes plus solide. merci encore une fois.
-
-
-chere mobiliere,
-
-ce matin, j'ai voulu prendre un petit-dejeuner au lit pour une fois. mais en voulant me recoucher, j'ai renverse tout mon cafe sur les draps et sur moi-meme. entre le lit trempe et mon pyjama, la journee commencait mal. heureusement, grace a vous, tout a ete nettoye rapidement. merci de m'avoir aide a retablir l'ordre.
-
-chere mobiliere,
-
-hier soir, j'avais prevu une soiree romantique a la maison. tout etait pret : bougies, musique douce... mais en voulant allumer la cheminee pour parfaire l'ambiance, j'ai mal géré et de la fumee a envahi toute la pièce. soiree ratee, mais heureusement, vous avez su nous aider a aerer et nettoyer tout ca. merci d'avoir sauve ce qui restait de l'ambiance.o
-
-chere mobiliere,
-
-l'autre nuit, je me suis reveille un peu deshabillee, apres avoir accidentellement fait tomber toutes les couvertures du lit. en voulant les recuperer, je me suis pris les pieds dedans et me suis retrouvée par terre, completement enchevêtrée dans les draps. heureusement, vous n'etiez pas là pour voir ca, mais vous avez su m'aider a changer mon matelas après l'incident. merci de me sortir des situations les plus embarrassantes.
 ";
