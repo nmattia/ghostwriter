@@ -27,7 +27,21 @@ use ghostwriter::leds;
 
 mod text;
 
-type State = bool; // true: currently running, false: not running
+// Whether we're typing or not
+#[derive(Clone)]
+enum State {
+    Typing,
+    Stopped,
+}
+
+impl State {
+    fn toggle(self: Self) -> State {
+        match self {
+            State::Typing => State::Stopped,
+            State::Stopped => State::Typing,
+        }
+    }
+}
 
 /// Entry point to our bare-metal application.
 ///
@@ -48,7 +62,7 @@ pub fn run(timer: hal::Timer, led_channels: crate::leds::LEDChannels) -> ! {
     // NOTE: the interrupt triggers once at the start (it seems) but because the input handler
     // has some debouncing (computed from epoch) this doesn't matter and the "press" is not
     // registered.
-    let state: Mutex<RefCell<State>> = Mutex::new(RefCell::new(false));
+    let state: Mutex<RefCell<State>> = Mutex::new(RefCell::new(State::Stopped));
 
     let handle_leds = handle_leds(&scheduler, &state, led_channels);
     let mut handle_leds = pin!(handle_leds);
@@ -85,8 +99,8 @@ async fn handle_input<'a>(scheduler: &ghostwriter::Scheduler<'a>, state: &Mutex<
 
         // Button was pressed, so flip the state.
         critical_section::with(|cs| {
-            let old: bool = state.borrow(cs).borrow().clone();
-            state.borrow(cs).replace(!old);
+            let old = state.borrow(cs).borrow().clone();
+            state.borrow(cs).replace(old.toggle());
         });
     }
 }
@@ -103,7 +117,10 @@ async fn handle_leds<'a>(
         let on = critical_section::with(|cs| state.borrow(cs).borrow().clone());
 
         // Period of a blink
-        let period_millis = if on { 1000.0 } else { 3000.0 };
+        let period_millis = match on {
+            State::Typing => 1000.0,
+            State::Stopped => 3000.0,
+        };
 
         // How far we are in one blink
         let x = elapsed_millis / period_millis;
@@ -111,10 +128,9 @@ async fn handle_leds<'a>(
         // Sine waveform, shifted to [+1, -1]
         let x = 0.5 * libm::sin(x * TAU) + 0.5;
 
-        if on {
-            led_channels.set_rgb(x / 1.0, x / 9.0, x);
-        } else {
-            led_channels.set_rgb(x / 3.0, x / 5.0, x / 4.0);
+        match on {
+            State::Typing => led_channels.set_rgb(x / 1.0, x / 9.0, x),
+            State::Stopped => led_channels.set_rgb(x / 3.0, x / 5.0, x / 4.0),
         }
     };
 
@@ -133,19 +149,20 @@ async fn handle_leds<'a>(
 async fn handle_usb<'a>(scheduler: &ghostwriter::Scheduler<'a>, state: &Mutex<RefCell<State>>) {
     let mut n_written: usize = 0;
     loop {
-        let on: bool = critical_section::with(|cs| {
+        let on = critical_section::with(|cs| {
             let f = state.borrow(cs).borrow();
             f.clone()
         });
 
         // Apply state (USB stuff)
-        let c = if !on {
-            0x00
-        } else {
-            let chr = text::TEXT.as_bytes()[n_written];
-            let keycode = text::char_to_keycode(chr);
-            n_written = (n_written + 1) % text::TEXT.len();
-            keycode
+        let c = match on {
+            State::Typing => {
+                let chr = text::TEXT.as_bytes()[n_written];
+                let keycode = text::char_to_keycode(chr);
+                n_written = (n_written + 1) % text::TEXT.len();
+                keycode
+            }
+            State::Stopped => 0x00,
         };
 
         let rep_down = KeyboardReport {
