@@ -17,6 +17,7 @@ use critical_section::Mutex;
 // USB Human Interface Device (HID) Class support
 use usbd_hid::descriptor::KeyboardReport;
 
+use core::f64::consts::TAU;
 use core::pin::pin;
 use futures::task::{noop_waker, Context, Poll};
 use futures::Future;
@@ -24,11 +25,12 @@ use futures::Future;
 use libm;
 
 use ghostwriter::leds;
+use ghostwriter::Duration;
 
 mod text;
 
 // Whether we're typing or not
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 enum State {
     Typing,
     Stopped,
@@ -111,38 +113,92 @@ async fn handle_leds<'a>(
     state: &Mutex<RefCell<State>>,
     mut led_channels: crate::leds::LEDChannels,
 ) {
-    let mut set = |elapsed_millis: f64| {
-        const TAU: f64 = 2.0 * core::f64::consts::PI;
+    let read_state = || critical_section::with(|cs| state.borrow(cs).borrow().clone());
 
-        let on = critical_section::with(|cs| state.borrow(cs).borrow().clone());
-
-        // Period of a blink
-        let period_millis = match on {
-            State::Typing => 1000.0,
-            State::Stopped => 3000.0,
-        };
-
-        // How far we are in one blink
-        let x = elapsed_millis / period_millis;
-
-        // Sine waveform, shifted to [+1, -1]
-        let x = 0.5 * libm::sin(x * TAU) + 0.5;
-
-        match on {
-            State::Typing => led_channels.set_rgb(x / 1.0, x / 9.0, x),
-            State::Stopped => led_channels.set_rgb(x / 3.0, x / 5.0, x / 4.0),
-        }
+    let state_color = |state: &State| match state {
+        State::Typing => (1.0 / 1.0, 1.0 / 9.0, 1.0 / 1.0),
+        State::Stopped => (1.0 / 3.0, 1.0 / 5.0, 1.0 / 4.0),
     };
 
-    // Approximate elapsed time
-    let mut elapsed_millis: f64 = 0.0;
+    type Color = (f64, f64, f64);
+    struct ColorAnimation {
+        started_at: Duration, /* timestamp at which animation was started */
+        start_color: Color,
+        diff_color: Color,
+    }
 
+    // Total animation duration
+    const ANIM_DURATION: Duration = Duration::millis(300);
+
+    // Animation delay (pause between LED adjustments)
     const DELAY_MILLIS: u64 = 50;
 
+    let mut last_state = read_state();
+    let mut color = state_color(&last_state);
+    let mut animation: Option<ColorAnimation> = None;
+
+    // Last time we updated the color & intensity
+    let mut last_t = scheduler.now();
+    let mut theta = 0.0;
+
     loop {
-        set(elapsed_millis);
+        let now = scheduler.now();
+        let delta_t = now - last_t;
+        last_t = now;
+
+        let state = read_state();
+
+        // If the state changed, start a new animation
+        if state != last_state {
+            let (r_, g_, b_) = state_color(&state);
+            let (r, g, b) = color;
+
+            animation = Some(ColorAnimation {
+                started_at: now,
+                start_color: color,
+                diff_color: (r_ - r, g_ - g, b_ - b),
+            });
+        }
+
+        // Update the color, if necessary
+        if let Some(ref anim) = animation {
+            // between [0,1], linearly interpolated
+            let ratio =
+                (now - anim.started_at).to_millis() as f64 / ANIM_DURATION.to_millis() as f64;
+            let ratio = libm::fmin(1.0, ratio);
+
+            // Apply the diff, proportionally
+            color = (
+                anim.start_color.0 + ratio * anim.diff_color.0,
+                anim.start_color.1 + ratio * anim.diff_color.1,
+                anim.start_color.2 + ratio * anim.diff_color.2,
+            );
+
+            // Animation end
+            if ratio >= 1.0 {
+                animation = None;
+            }
+        };
+
+        // State specific data
+        let (v_min, v_max, period_millis) = match state {
+            State::Typing => (0.0, 1.0, 1000.0),
+            State::Stopped => (0.3, 0.5, 2000.0),
+        };
+
+        // How far we are in one blink (intensity follows a sine wave)
+        theta = theta + (delta_t.to_millis() as f64 / period_millis) * TAU;
+        let intensity = (v_max - v_min) * (0.5 * libm::sin(theta) + 0.5) + v_min;
+
+        led_channels.set_rgb(
+            intensity * color.0,
+            intensity * color.1,
+            intensity * color.2,
+        );
+        last_state = state;
+
+        // Wait some time before adjusting color
         scheduler.sleep_ms(DELAY_MILLIS).await;
-        elapsed_millis += DELAY_MILLIS as f64;
     }
 }
 
