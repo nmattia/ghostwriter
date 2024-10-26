@@ -8,6 +8,7 @@ use panic_halt as _;
 use pimoroni_tiny2040 as bsp;
 
 use bsp::hal;
+use bsp::hal::timer::Alarm;
 use bsp::hal::{gpio, pac::interrupt};
 
 // Locking
@@ -23,6 +24,8 @@ use futures::Future;
 
 use bsp::hal::pac;
 
+use hal::fugit::MicrosDurationU32;
+
 pub mod leds;
 pub mod usb;
 
@@ -34,7 +37,15 @@ static _BUTTON_PIN: Mutex<RefCell<Option<ButtonPin>>> = Mutex::new(RefCell::new(
 /// Global state shared between the eventloop and the button interrupt handler.
 static BUTTON_DOWN: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(false));
 
+/// The first alarm (see rp2040 datasheet chapter 4.6)
+static ALARM0: Mutex<RefCell<Option<hal::timer::Alarm0>>> = Mutex::new(RefCell::new(None));
+
+/// When the next wakeup is scheduled (if any)
+static NEXT_WAKEUP: Mutex<RefCell<Option<Instant>>> = Mutex::new(RefCell::new(None));
+
 /// Sets up the ghostwriter silicon. Booooh!
+///
+/// NOTE: The timer's `alarm0` has already been taken, do _not_ try to use it.
 pub fn setup() -> (hal::Timer, leds::LEDChannels) {
     // Grab our singleton objects
     let mut pac = pac::Peripherals::take().unwrap();
@@ -76,8 +87,13 @@ pub fn setup() -> (hal::Timer, leds::LEDChannels) {
 
     setup_button(button_pin);
 
-    // Prepare timer
-    let timer = hal::Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
+    // Prepare timer & alarm
+    let mut timer = hal::Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
+    let mut alarm0 = timer.alarm_0().unwrap();
+    alarm0.enable_interrupt();
+    let _ = alarm0.schedule(MicrosDurationU32::secs(1));
+
+    critical_section::with(|cs| ALARM0.borrow(cs).replace(Some(alarm0)));
 
     // Set up the USB driver
     let usb_clock = clocks.usb_clock;
@@ -94,17 +110,24 @@ pub fn setup() -> (hal::Timer, leds::LEDChannels) {
 
         // Enable the button click interrupt
         pac::NVIC::unmask(pac::Interrupt::IO_IRQ_BANK0);
+
+        // Enable the timer interrupt
+        pac::NVIC::unmask(pac::Interrupt::TIMER_IRQ_0);
     };
 
     (timer, led_channels)
 }
 
-// Duration
+// Time related types
 pub type Duration = hal::fugit::Duration<u64, 1, 1000000>;
+pub type Instant = hal::fugit::Instant<u64, 1, 1000000>;
+
+// The "epoch", i.e. t0 when the board booted up
+static BOOT_TIME: Instant = Instant::from_ticks(0);
 
 // Async/await sleep
 pub struct Sleep<'a> {
-    target: Duration,
+    target: Instant,
     timer: &'a hal::Timer,
 }
 
@@ -112,11 +135,24 @@ impl Future for Sleep<'_> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, _ctx: &mut Context<'_>) -> Poll<Self::Output> {
-        let now: Duration = self.timer.get_counter().duration_since_epoch();
+        let now: Instant = BOOT_TIME + self.timer.get_counter().duration_since_epoch();
 
         if self.target < now {
             Poll::Ready(())
         } else {
+            // If we're not ready, then sleep until either the next scheduled wake up or (if
+            // earlier) our expected wake up.
+            critical_section::with(|cs| {
+                let next_wakeup = NEXT_WAKEUP.borrow(cs).take();
+                let next_wakeup = next_wakeup
+                    .map(|next_target| core::cmp::min(self.target, next_target))
+                    .unwrap_or(self.target);
+                NEXT_WAKEUP.borrow(cs).replace(Some(next_wakeup));
+
+                let mut alarm0 = ALARM0.borrow(cs).borrow_mut();
+                let alarm0 = alarm0.as_mut().unwrap();
+                let _ = alarm0.schedule_at(next_wakeup);
+            });
             Poll::Pending
         }
     }
@@ -156,7 +192,7 @@ impl<'a> Scheduler<'a> {
     }
 
     pub fn sleep_ms(self: &Self, v: u64) -> Sleep<'a> {
-        let now: Duration = self.timer.get_counter().duration_since_epoch();
+        let now: Instant = BOOT_TIME + self.timer.get_counter().duration_since_epoch();
         let delta: Duration = Duration::millis(v);
         Sleep {
             target: now + delta,
@@ -206,4 +242,16 @@ fn IO_IRQ_BANK0() {
             });
         }
     }
+}
+
+#[interrupt]
+fn TIMER_IRQ_0() {
+    // Clear the interrupt and the clear NEXT_WAKEUP
+    critical_section::with(|cs| {
+        let mut alarm0 = ALARM0.borrow(cs).borrow_mut();
+        let alarm0 = alarm0.as_mut().unwrap();
+        alarm0.clear_interrupt();
+
+        NEXT_WAKEUP.borrow(cs).replace(None);
+    });
 }

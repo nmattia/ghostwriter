@@ -55,7 +55,7 @@ pub fn setup_usb_driver(
         // reference exists!
         let bus_ref = unsafe { USB_BUS.as_ref().unwrap() };
 
-        // Set up the USB HID Class Device driver, providing Mouse Reports
+        // Set up the USB HID Class Device driver
         let usb_hid = HIDClass::new(bus_ref, KeyboardReport::desc(), 60);
         unsafe {
             // Note (safety): This is safe as interrupts haven't been started yet.

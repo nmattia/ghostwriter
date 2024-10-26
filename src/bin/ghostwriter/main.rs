@@ -37,7 +37,7 @@ enum State {
 }
 
 impl State {
-    fn toggle(self: Self) -> State {
+    fn toggle(self: &Self) -> State {
         match self {
             State::Typing => State::Stopped,
             State::Stopped => State::Typing,
@@ -56,7 +56,7 @@ fn main() -> ! {
     run(timer, led_channels)
 }
 
-// Future executor that loops through all futures and polls them consistently.
+// Future executor that polls futures and otherwise waits for an interrupt.
 pub fn run(timer: hal::Timer, led_channels: crate::leds::LEDChannels) -> ! {
     let scheduler = ghostwriter::Scheduler::new(&timer);
 
@@ -82,6 +82,10 @@ pub fn run(timer: hal::Timer, led_channels: crate::leds::LEDChannels) -> ! {
         let _: Poll<()> = handle_leds.as_mut().poll(&mut ctx);
         let _: Poll<()> = handle_usb.as_mut().poll(&mut ctx);
         let _: Poll<()> = handle_input.as_mut().poll(&mut ctx);
+
+        // Since both sleep & input wait for an interrupt, we can just put the core to sleep
+        // and wait for an interrupt
+        cortex_m::asm::wfi();
     }
 }
 
@@ -100,10 +104,7 @@ async fn handle_input<'a>(scheduler: &ghostwriter::Scheduler<'a>, state: &Mutex<
         last_press = now;
 
         // Button was pressed, so flip the state.
-        critical_section::with(|cs| {
-            let old = state.borrow(cs).borrow().clone();
-            state.borrow(cs).replace(old.toggle());
-        });
+        critical_section::with(|cs| state.borrow(cs).replace_with(|state| state.toggle()));
     }
 }
 
