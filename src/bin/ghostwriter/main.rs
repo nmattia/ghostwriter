@@ -9,6 +9,7 @@ use bsp::entry;
 use pimoroni_tiny2040 as bsp;
 
 use bsp::hal;
+use bsp::hal::rosc::{Enabled, RingOscillator};
 
 // Locking
 use core::cell::RefCell;
@@ -23,6 +24,7 @@ use futures::task::{noop_waker, Context, Poll};
 use futures::Future;
 
 use libm;
+use rand_distr::{ChiSquared, Distribution, Normal};
 
 use ghostwriter::leds;
 use ghostwriter::Duration;
@@ -51,13 +53,17 @@ impl State {
 /// as soon as all global variables are initialised.
 #[entry]
 fn main() -> ! {
-    let (timer, led_channels) = ghostwriter::setup();
+    let (timer, led_channels, rosc) = ghostwriter::setup();
 
-    run(timer, led_channels)
+    run(timer, led_channels, rosc)
 }
 
 // Future executor that polls futures and otherwise waits for an interrupt.
-pub fn run(timer: hal::Timer, led_channels: crate::leds::LEDChannels) -> ! {
+pub fn run(
+    timer: hal::Timer,
+    led_channels: crate::leds::LEDChannels,
+    mut rosc: RingOscillator<Enabled>,
+) -> ! {
     let scheduler = ghostwriter::Scheduler::new(&timer);
 
     // The global state
@@ -69,7 +75,7 @@ pub fn run(timer: hal::Timer, led_channels: crate::leds::LEDChannels) -> ! {
     let handle_leds = handle_leds(&scheduler, &state, led_channels);
     let mut handle_leds = pin!(handle_leds);
 
-    let handle_usb = handle_usb(&scheduler, &state);
+    let handle_usb = handle_usb(&scheduler, &state, &mut rosc);
     let mut handle_usb = pin!(handle_usb);
 
     let handle_input = handle_input(&scheduler, &state);
@@ -203,8 +209,19 @@ async fn handle_leds<'a>(
     }
 }
 
-async fn handle_usb<'a>(scheduler: &ghostwriter::Scheduler<'a>, state: &Mutex<RefCell<State>>) {
+async fn handle_usb<'a>(
+    scheduler: &ghostwriter::Scheduler<'a>,
+    state: &Mutex<RefCell<State>>,
+    rosc: &mut RingOscillator<Enabled>,
+) {
     let mut n_written: usize = 0;
+
+    // KeyPRessDelay & InterKeyInterval distributions
+    // naming from "Observations on Typing from 136 Million Keystrokes"
+    // distributions adapted
+    let rand_kprd = Normal::new(50.49, 17.38).unwrap();
+    let rand_iki = ChiSquared::new(5.0).unwrap();
+
     loop {
         let on = critical_section::with(|cs| {
             let f = state.borrow(cs).borrow();
@@ -215,32 +232,45 @@ async fn handle_usb<'a>(scheduler: &ghostwriter::Scheduler<'a>, state: &Mutex<Re
         let c = match on {
             State::Typing => {
                 let chr = text::TEXT.as_bytes()[n_written];
-                let keycode = text::char_to_keycode(chr);
                 n_written = (n_written + 1) % text::TEXT.len();
-                keycode
+                chr
             }
-            State::Stopped => 0x00,
+            State::Stopped => {
+                // When stopped, don't write anything.
+                // Wait a couple ms before looping.
+                scheduler.sleep_ms(100).await;
+                continue;
+            }
         };
 
-        let rep_down = KeyboardReport {
-            modifier: 0,
-            reserved: 0,
-            leds: 0,
-            keycodes: [c, 0, 0, 0, 0, 0],
-        };
-        let rep_up = KeyboardReport {
-            modifier: 0,
-            reserved: 0,
-            leds: 0,
-            keycodes: [0x00, 0, 0, 0, 0, 0],
-        };
+        let kprd = rand_kprd.sample(rosc) as u64;
+        write_char(scheduler, kprd, c).await;
 
-        ghostwriter::usb::push_hid_report(rep_down)
-            .ok()
-            .unwrap_or(0);
-
-        scheduler.sleep_ms(50).await;
-        ghostwriter::usb::push_hid_report(rep_up).ok().unwrap_or(0);
-        scheduler.sleep_ms(100).await;
+        let iki = 30 + 10 * rand_iki.sample(rosc) as u64;
+        scheduler.sleep_ms(iki).await;
     }
+}
+
+async fn write_char<'a>(scheduler: &ghostwriter::Scheduler<'a>, kprd: u64, chr: u8) {
+    let keycode = text::char_to_keycode(chr);
+    write_key(scheduler, kprd, keycode).await;
+}
+
+async fn write_key<'a>(scheduler: &ghostwriter::Scheduler<'a>, kprd: u64, keycode: u8) {
+    let report_keydown = KeyboardReport {
+        modifier: 0,
+        reserved: 0,
+        leds: 0,
+        keycodes: [keycode, 0, 0, 0, 0, 0],
+    };
+    let report_keyup = KeyboardReport {
+        modifier: 0,
+        reserved: 0,
+        leds: 0,
+        keycodes: [0x00, 0, 0, 0, 0, 0],
+    };
+
+    let _ = ghostwriter::usb::push_hid_report(report_keydown);
+    scheduler.sleep_ms(kprd).await;
+    let _ = ghostwriter::usb::push_hid_report(report_keyup);
 }

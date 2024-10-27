@@ -8,6 +8,7 @@ use panic_halt as _;
 use pimoroni_tiny2040 as bsp;
 
 use bsp::hal;
+use bsp::hal::rosc::{Enabled, RingOscillator};
 use bsp::hal::timer::Alarm;
 use bsp::hal::{gpio, pac::interrupt};
 
@@ -46,7 +47,7 @@ static NEXT_WAKEUP: Mutex<RefCell<Option<Instant>>> = Mutex::new(RefCell::new(No
 /// Sets up the ghostwriter silicon. Booooh!
 ///
 /// NOTE: The timer's `alarm0` has already been taken, do _not_ try to use it.
-pub fn setup() -> (hal::Timer, leds::LEDChannels) {
+pub fn setup() -> (hal::Timer, leds::LEDChannels, RingOscillator<Enabled>) {
     // Grab our singleton objects
     let mut pac = pac::Peripherals::take().unwrap();
 
@@ -104,6 +105,9 @@ pub fn setup() -> (hal::Timer, leds::LEDChannels) {
         &mut pac.RESETS,
     );
 
+    // Ring oscillator, used as a RNG
+    let rosc = RingOscillator::new(pac.ROSC).initialize();
+
     unsafe {
         // Enable the USB interrupt
         pac::NVIC::unmask(hal::pac::Interrupt::USBCTRL_IRQ);
@@ -115,7 +119,7 @@ pub fn setup() -> (hal::Timer, leds::LEDChannels) {
         pac::NVIC::unmask(pac::Interrupt::TIMER_IRQ_0);
     };
 
-    (timer, led_channels)
+    (timer, led_channels, rosc)
 }
 
 // Time related types
