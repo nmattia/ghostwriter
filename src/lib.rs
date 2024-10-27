@@ -128,6 +128,32 @@ pub type Instant = hal::fugit::Instant<u64, 1, 1000000>;
 // The "epoch", i.e. t0 when the board booted up
 static BOOT_TIME: Instant = Instant::from_ticks(0);
 
+/// Wait until an event is available to process.
+///
+/// In practice this registers a wake up alarm if necessary and puts the cortex to
+/// sleep by calling Wait For Interrupt (and not actually the cortex' Wait For Event, but "event"
+/// make more sense in the context of an event loop).
+pub fn wait_for_event() {
+    critical_section::with(|cs| {
+        let next_wakeup = NEXT_WAKEUP.borrow(cs).replace(None);
+
+        if let Some(next_wakeup) = next_wakeup {
+            let mut alarm0 = ALARM0.borrow(cs).borrow_mut();
+            let alarm0 = alarm0.as_mut().unwrap();
+            let _ = alarm0.schedule_at(next_wakeup);
+        }
+
+        // Since both sleep & input wait for an interrupt, we can just put the core to sleep
+        // and wait for an interrupt.
+        // We put this _inside_ the critical_section, otherwise the interrupts will have been
+        // re-enabled before we reach WFI and the alarm might have triggered before.
+        //
+        // It's fine to WFI inside critical section; even though interrupts are "disabled" the chip
+        // will still be woken up.
+        cortex_m::asm::wfi();
+    });
+}
+
 // Async/await sleep
 pub struct Sleep<'a> {
     target: Instant,
@@ -151,10 +177,6 @@ impl Future for Sleep<'_> {
                     .map(|next_target| core::cmp::min(self.target, next_target))
                     .unwrap_or(self.target);
                 NEXT_WAKEUP.borrow(cs).replace(Some(next_wakeup));
-
-                let mut alarm0 = ALARM0.borrow(cs).borrow_mut();
-                let alarm0 = alarm0.as_mut().unwrap();
-                let _ = alarm0.schedule_at(next_wakeup);
             });
             Poll::Pending
         }
