@@ -88,9 +88,7 @@ pub fn run(
         let _: Poll<()> = handle_usb.as_mut().poll(&mut ctx);
         let _: Poll<()> = handle_input.as_mut().poll(&mut ctx);
 
-        // Since both sleep & input wait for an interrupt, we can just put the core to sleep
-        // and wait for an interrupt
-        cortex_m::asm::wfi();
+        ghostwriter::wait_for_event();
     }
 }
 
