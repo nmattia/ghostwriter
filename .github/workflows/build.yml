@@ -11,10 +11,15 @@ jobs:
         with:
           target: thumbv6m-none-eabi
       - run: cargo build --release
-      - run: cargo install elf2uf2-rs --target x86_64-unknown-linux-gnu --version 2.1.1
-      - run: elf2uf2-rs ./target/thumbv6m-none-eabi/release/ghostwriter ghostwriter.uf2
+      - uses: ./.github/actions/picotool
+      - run: cp ./target/thumbv6m-none-eabi/release/ghostwriter ghostwriter.elf
+      - run: picotool uf2 convert ./ghostwriter.elf ghostwriter.uf2
       - uses: actions/upload-artifact@v4
         with:
           name: ghostwriter.uf2
           path: ./ghostwriter.uf2
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ghostwriter.elf
+          path: ./ghostwriter.elf
