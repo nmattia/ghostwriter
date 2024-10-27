@@ -1,0 +1,14 @@
+name: Rustfmt
+on: push
+
+jobs:
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.80.1
+        with:
+          target: thumbv6m-none-eabi
+          components: rustfmt
+      - run: cargo fmt -- --check
