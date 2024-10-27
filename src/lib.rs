@@ -16,7 +16,6 @@ use bsp::hal::{gpio, pac::interrupt};
 use core::cell::RefCell;
 use critical_section::Mutex;
 
-use core::clone::Clone;
 use core::option::Option;
 use core::option::Option::{None, Some};
 use core::pin::Pin;
@@ -171,7 +170,7 @@ impl Future for Input {
     fn poll(self: Pin<&mut Self>, _ctx: &mut Context<'_>) -> Poll<Self::Output> {
         let was_pressed = critical_section::with(|cs| {
             // Check if button has been pressed
-            let was_pressed: bool = BUTTON_DOWN.borrow(cs).borrow().clone();
+            let was_pressed: bool = *BUTTON_DOWN.borrow(cs).borrow();
             BUTTON_DOWN.borrow(cs).replace(false);
             was_pressed
         });
@@ -192,23 +191,23 @@ pub struct Scheduler<'a> {
 
 impl<'a> Scheduler<'a> {
     pub fn new(timer: &'a hal::Timer) -> Self {
-        Scheduler { timer: &timer }
+        Scheduler { timer }
     }
 
-    pub fn sleep_ms(self: &Self, v: u64) -> Sleep<'a> {
+    pub fn sleep_ms(&self, v: u64) -> Sleep<'a> {
         let now: Instant = BOOT_TIME + self.timer.get_counter().duration_since_epoch();
         let delta: Duration = Duration::millis(v);
         Sleep {
             target: now + delta,
-            timer: &self.timer,
+            timer: self.timer,
         }
     }
 
-    pub fn wait_for_press(self: &Self) -> Input {
+    pub fn wait_for_press(&self) -> Input {
         Input {}
     }
 
-    pub fn now(self: &Self) -> Duration {
+    pub fn now(&self) -> Duration {
         self.timer.get_counter().duration_since_epoch()
     }
 }
