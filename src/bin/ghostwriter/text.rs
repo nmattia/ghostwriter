@@ -1,6 +1,8 @@
 /// Text (typing) related
 
 /// Convert an ASCII char code to a keyboard keycode
+#[allow(clippy::if_same_then_else)]
+#[allow(clippy::manual_range_contains)]
 pub fn char_to_keycode(chr: u8) -> u8 {
     if chr >= 97 && chr <= 122 {
         chr - 97 + 4

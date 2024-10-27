@@ -23,7 +23,6 @@ use core::pin::pin;
 use futures::task::{noop_waker, Context, Poll};
 use futures::Future;
 
-use libm;
 use rand_distr::{ChiSquared, Distribution, Normal};
 
 use ghostwriter::leds;
@@ -39,7 +38,7 @@ enum State {
 }
 
 impl State {
-    fn toggle(self: &Self) -> State {
+    fn toggle(&self) -> State {
         match self {
             State::Typing => State::Stopped,
             State::Stopped => State::Typing,
@@ -122,6 +121,7 @@ async fn handle_leds<'a>(
 ) {
     let read_state = || critical_section::with(|cs| state.borrow(cs).borrow().clone());
 
+    #[allow(clippy::eq_op)]
     let state_color = |state: &State| match state {
         State::Typing => (1.0 / 1.0, 1.0 / 9.0, 1.0 / 1.0),
         State::Stopped => (1.0 / 3.0, 1.0 / 5.0, 1.0 / 4.0),
@@ -194,7 +194,7 @@ async fn handle_leds<'a>(
         };
 
         // How far we are in one blink (intensity follows a sine wave)
-        theta = theta + (delta_t.to_millis() as f64 / period_millis) * TAU;
+        theta += (delta_t.to_millis() as f64 / period_millis) * TAU;
         let intensity = (v_max - v_min) * (0.5 * libm::sin(theta) + 0.5) + v_min;
 
         led_channels.set_rgb(

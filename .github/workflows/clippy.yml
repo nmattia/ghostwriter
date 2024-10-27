@@ -1,0 +1,15 @@
+# Clippy
+name: Clippy check
+on: push
+
+jobs:
+  clippy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.80.1
+        with:
+          target: thumbv6m-none-eabi
+          components: clippy
+      # Use -D warnings to error out on warnings
+      - run: cargo clippy -- -D warnings
