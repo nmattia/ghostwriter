@@ -1,0 +1,37 @@
+name: 'Install picotool'
+description: 'Installs the picotool executable from raspberry/picotool.'
+runs:
+  using: "composite"
+  steps:
+    # Check out the SDK (used by picotool)
+    - name: Checkout pico-sdk
+      uses: actions/checkout@v4
+      with:
+        repository: raspberrypi/pico-sdk
+        path: pico-sdk
+        ref: efe2103f9b28458a1615ff096054479743ade236
+
+    # Check out picotool itself
+    - name: Checkout picotool
+      uses: actions/checkout@v4
+      with:
+        repository: raspberrypi/picotool
+        path: picotool
+        ref: bf33c6ddd756c3961c7a13b000859b71e825ee74
+
+    # Make sure we have cmake etc
+    - name: Install build dependencies
+      run: sudo apt install -y build-essential pkg-config libusb-1.0-0-dev cmake
+      shell: bash
+
+    # Build and install
+    - name: Build picotool
+      run: |
+        export PICO_SDK_PATH=$GITHUB_WORKSPACE/pico-sdk
+        cd $GITHUB_WORKSPACE/picotool
+        mkdir build
+        cd build
+        cmake ..
+        make
+        sudo make install
+      shell: bash

@@ -1,0 +1,25 @@
+# Build the project and upload binaries as artifacts
+name: Build
+on: push
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.80.1
+        with:
+          target: thumbv6m-none-eabi
+      - run: cargo build --release
+      - uses: ./.github/actions/picotool
+      - run: cp ./target/thumbv6m-none-eabi/release/ghostwriter ghostwriter.elf
+      - run: picotool uf2 convert ./ghostwriter.elf ghostwriter.uf2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ghostwriter.uf2
+          path: ./ghostwriter.uf2
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ghostwriter.elf
+          path: ./ghostwriter.elf
