@@ -172,12 +172,14 @@ impl Future for Sleep<'_> {
             // If we're not ready, then sleep until either the next scheduled wake up or (if
             // earlier) our expected wake up.
             critical_section::with(|cs| {
-                let next_wakeup = NEXT_WAKEUP.borrow(cs).take();
-                let next_wakeup = next_wakeup
-                    .map(|next_target| core::cmp::min(self.target, next_target))
-                    .unwrap_or(self.target);
-                NEXT_WAKEUP.borrow(cs).replace(Some(next_wakeup));
+                NEXT_WAKEUP.borrow(cs).replace_with(|next_wakeup| {
+                    let next_wakeup = next_wakeup
+                        .map(|next_target| core::cmp::min(self.target, next_target))
+                        .unwrap_or(self.target);
+                    Some(next_wakeup)
+                });
             });
+
             Poll::Pending
         }
     }
@@ -190,12 +192,8 @@ impl Future for Input {
     type Output = bool;
 
     fn poll(self: Pin<&mut Self>, _ctx: &mut Context<'_>) -> Poll<Self::Output> {
-        let was_pressed = critical_section::with(|cs| {
-            // Check if button has been pressed
-            let was_pressed: bool = *BUTTON_DOWN.borrow(cs).borrow();
-            BUTTON_DOWN.borrow(cs).replace(false);
-            was_pressed
-        });
+        // Check if button has been pressed
+        let was_pressed = critical_section::with(|cs| BUTTON_DOWN.borrow(cs).replace(false));
 
         // If the button was pressed, we're ready to continue
         if was_pressed {
@@ -271,12 +269,11 @@ fn IO_IRQ_BANK0() {
 
 #[interrupt]
 fn TIMER_IRQ_0() {
-    // Clear the interrupt and the clear NEXT_WAKEUP
+    // Clear the interrupt and return. The only point in this is waking up the cortex
+    // from wfi.
     critical_section::with(|cs| {
         let mut alarm0 = ALARM0.borrow(cs).borrow_mut();
         let alarm0 = alarm0.as_mut().unwrap();
         alarm0.clear_interrupt();
-
-        NEXT_WAKEUP.borrow(cs).replace(None);
-    });
+    })
 }
