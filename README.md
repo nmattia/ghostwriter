@@ -90,7 +90,7 @@ Everything (from the LED color and blinking patterns, button actions, USB produc
 <!-- GETTING STARTED -->
 ## Getting Started
 
-To install the `lorem` firmware -- spitting out lorem ipsum on the press of a button -- follow the next steps.
+To install the `lorem` firmware — spitting out lorem ipsum on the press of a button — follow the next steps.
 
 <br/>
 <br/>
@@ -149,13 +149,13 @@ cargo build --release --bin lorem
 
 Make sure [elf2uf2-rs](https://github.com/JoNil/elf2uf2-rs) is installed. Then deploy the firmware to the Tiny 2040 (ensure the device is connect and in boot mode, i.e. `boot` was pressed when plugging the device):
 
+> [!NOTE]
+> The command below uses the `runner` specified in `.cargo/config` to convert the cargo-built ELF file to uf2 and deploy it to the connected Tiny 2040.
+
 ```
 cargo install elf2uf2-rs
 cargo run --release --bin lorem
 ```
-
-This uses the `runner` specified in `.cargo/config` to convert the cargo-built ELF file to uf2 and deploy it to the connected Tiny 2040.
-
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -180,7 +180,6 @@ Project Link: [https://github.com/nmattia/ghostwriter](https://github.com/nmatti
 * [Othneil Drew's README template](https://github.com/othneildrew/Best-README-Template)
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
-
 
 <!-- MARKDOWN LINKS & IMAGES -->
 <!-- https://www.markdownguide.org/basic-syntax/#reference-style-links -->
