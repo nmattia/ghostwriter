@@ -21,10 +21,8 @@ Adapted where relevant.
     <a href="https://github.com/nmattia/ghostwriter#getting-started"><strong>Getting Started »</strong></a>
     <br />
     <br />
-    <!-- TODO: Printables
-    <a href="#">Printables</a>
-    ·
-    -->
+    <a href="https://www.printables.com/model/1055689-ghostwriter-usb-macropad">Printables Page</a>
+        ·
     <a href="https://github.com/nmattia/ghostwriter/issues/new">Report Bug</a>
         ·
     <a href="https://cad.onshape.com/documents/5380da1daf1adb7ecfc899db/w/b6aa2025c0e95218301ba104/e/591c8ed175a0952e497c7e59?renderMode=0&uiState=671e85af930e803261c8c26f">Onshape Project</a>
@@ -97,13 +95,10 @@ To install the `lorem` firmware — spitting out lorem ipsum on the press of a b
 
 <p align="center"><img src="./images/lorem.gif" alt="Ghostwriter printing lorem ipsum"/></p>
 
-<!-- TODO: add printables link
 
 > [!NOTE]
 > These instructions focus on the Firmware. For instructions on how to 3D print the
 > Ghostwriter case please refer to the [Printables page][printables-ghostwriter].
-
--->
 
 ### Prerequisites
 
@@ -117,7 +112,7 @@ In order to install the firmware (`lorem`) you need:
 ### Installing the Firmware
 
 1. Download the `lorem.uf2` firmware from the [Release page][releases].
-2. Press the `boot` button of the Tiny 2040 and (with the `boot` button pressed) connect it to your computer via USB. <!-- TODO: printables: **NOTE**: If you have printed the [Ghostwriter case][printables-ghostwriter], the `boot` button is the (one and only) button pressed when you squeeze the case. -->
+2. Press the `boot` button of the Tiny 2040 and (with the `boot` button pressed) connect it to your computer via USB. **NOTE**: If you have printed the [Ghostwriter case][printables-ghostwriter], the `boot` button is the (one and only) button pressed when you squeeze the case.
 3. Verify that the Tiny 2040 is mounted as removable storage.
 4. Drag and drop the `lorem.uf2` firmware to the removable storage volume.
 5. **SUCCESS!** The Tiny 2040 reboots and loads the firmware.
@@ -194,7 +189,7 @@ Project Link: [https://github.com/nmattia/ghostwriter](https://github.com/nmatti
 [releases]: https://github.com/nmattia/ghostwriter/releases
 
 
-[printables-ghostwriter]: https://example.com
+[printables-ghostwriter]: https://www.printables.com/model/1055689-ghostwriter-usb-macropad
 
 [nmattia.com]: https://nmattia.com
 
