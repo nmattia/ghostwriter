@@ -4,5 +4,5 @@
 Build and run:
 
 ```
-cargo run --release --bin ghostwriter
+cargo run --release --bin lorem
 ```

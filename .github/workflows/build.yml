@@ -12,14 +12,14 @@ jobs:
           target: thumbv6m-none-eabi
       - run: cargo build --release
       - uses: ./.github/actions/picotool
-      - run: cp ./target/thumbv6m-none-eabi/release/ghostwriter ghostwriter.elf
-      - run: picotool uf2 convert ./ghostwriter.elf ghostwriter.uf2
+      - run: cp ./target/thumbv6m-none-eabi/release/lorem lorem.elf
+      - run: picotool uf2 convert ./lorem.elf lorem.uf2
       - uses: actions/upload-artifact@v4
         with:
-          name: ghostwriter.uf2
-          path: ./ghostwriter.uf2
+          name: lorem.uf2
+          path: ./lorem.uf2
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ghostwriter.elf
-          path: ./ghostwriter.elf
+          name: lorem.elf
+          path: ./lorem.elf
