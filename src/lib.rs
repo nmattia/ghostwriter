@@ -35,7 +35,7 @@ type ButtonPin = gpio::Pin<gpio::bank0::Gpio23, gpio::FunctionSio<gpio::SioInput
 static _BUTTON_PIN: Mutex<RefCell<Option<ButtonPin>>> = Mutex::new(RefCell::new(None));
 
 /// Global state shared between the eventloop and the button interrupt handler.
-static BUTTON_DOWN: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(false));
+static BUTTON_DOWN: Mutex<RefCell<Option<Keypress>>> = Mutex::new(RefCell::new(None));
 
 /// The first alarm (see rp2040 datasheet chapter 4.6)
 static ALARM0: Mutex<RefCell<Option<hal::timer::Alarm0>>> = Mutex::new(RefCell::new(None));
@@ -185,19 +185,27 @@ impl Future for Sleep<'_> {
     }
 }
 
+// Input
+
+// Result of a keypress, either down (pressed) or up (released)
+pub enum Keypress {
+    Up,
+    Down,
+}
+
 /// Async/await waiting for user input (button press)
 pub struct Input {}
 
 impl Future for Input {
-    type Output = bool;
+    type Output = Keypress;
 
     fn poll(self: Pin<&mut Self>, _ctx: &mut Context<'_>) -> Poll<Self::Output> {
         // Check if button has been pressed
-        let was_pressed = critical_section::with(|cs| BUTTON_DOWN.borrow(cs).replace(false));
+        let was_pressed = critical_section::with(|cs| BUTTON_DOWN.borrow(cs).replace(None));
 
         // If the button was pressed, we're ready to continue
-        if was_pressed {
-            Poll::Ready(true)
+        if let Some(kp) = was_pressed {
+            Poll::Ready(kp)
         } else {
             Poll::Pending
         }
@@ -227,6 +235,33 @@ impl<'a> Scheduler<'a> {
         Input {}
     }
 
+    pub async fn wait_for_click(&self) {
+        // Loop until a meaningful sequence of Keydown - Keyup occurs.
+        //
+        // If the sequence happens too fast, pretend this current press didn't happen.
+        loop {
+            // Wait for press down
+            match self.wait_for_press().await {
+                Keypress::Up => continue,
+                Keypress::Down => {}
+            }
+            let pressed_at = self.now();
+
+            // Wait for press up
+            match self.wait_for_press().await {
+                Keypress::Up => {}
+                Keypress::Down => continue, // Two key downs, something is off; retry
+            }
+            let released_at = self.now();
+            if (released_at - pressed_at).to_millis() < 50 {
+                // Anything this fast we pretend didn't happen
+                continue;
+            }
+
+            break;
+        }
+    }
+
     pub fn now(&self) -> Duration {
         self.timer.get_counter().duration_since_epoch()
     }
@@ -238,10 +273,11 @@ pub fn setup_button(button_pin: ButtonPin) {
     // Trigger on the 'falling edge' of the input pin.
     // This will happen as the button is being pressed
     button_pin.set_interrupt_enabled(gpio::Interrupt::EdgeLow, true);
+    button_pin.set_interrupt_enabled(gpio::Interrupt::EdgeHigh, true);
 
     critical_section::with(|cs| {
         _BUTTON_PIN.borrow(cs).replace(Some(button_pin));
-        BUTTON_DOWN.borrow(cs).replace(false);
+        BUTTON_DOWN.borrow(cs).replace(None);
     });
 }
 
@@ -261,7 +297,12 @@ fn IO_IRQ_BANK0() {
         if button.interrupt_status(gpio::Interrupt::EdgeLow) {
             button.clear_interrupt(gpio::Interrupt::EdgeLow);
             critical_section::with(|cs| {
-                BUTTON_DOWN.borrow(cs).replace(true);
+                BUTTON_DOWN.borrow(cs).replace(Some(Keypress::Down));
+            });
+        } else if button.interrupt_status(gpio::Interrupt::EdgeHigh) {
+            button.clear_interrupt(gpio::Interrupt::EdgeHigh);
+            critical_section::with(|cs| {
+                BUTTON_DOWN.borrow(cs).replace(Some(Keypress::Up));
             });
         }
     }
