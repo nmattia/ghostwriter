@@ -92,21 +92,11 @@ pub fn run(
     }
 }
 
+// Change state whenever button is pressed
 async fn handle_input<'a>(scheduler: &ghostwriter::Scheduler<'a>, state: &Mutex<RefCell<State>>) {
-    // Memory of the last (registered, acknowledged) press, needed for debouncing
-    let mut last_press: ghostwriter::Duration = ghostwriter::Duration::secs(0);
     loop {
-        scheduler.wait_for_press().await;
-
-        // If the last press occurred in the last few moments (and technically within
-        // the first few moments after boot), pretend this current press didn't happen.
-        let now = scheduler.now();
-        if now.to_millis() - last_press.to_millis() < 300 {
-            continue;
-        }
-        last_press = now;
-
-        // Button was pressed, so flip the state.
+        scheduler.wait_for_click().await;
+        // Button was pressed, so toggle the state.
         critical_section::with(|cs| state.borrow(cs).replace_with(|state| state.toggle()));
     }
 }
