@@ -20,7 +20,7 @@ use usbd_hid::descriptor::KeyboardReport;
 
 use core::f64::consts::TAU;
 use core::pin::pin;
-use futures::task::{noop_waker, Context, Poll};
+use futures::task::Poll;
 use futures::Future;
 
 use rand_distr::{ChiSquared, Distribution, Normal};
@@ -57,10 +57,10 @@ fn main() -> ! {
     run(timer, led_channels, rosc)
 }
 
-// Future executor that polls futures and otherwise waits for an interrupt.
+// Run the lorem program
 pub fn run(
     timer: hal::Timer,
-    led_channels: crate::leds::LEDChannels,
+    led_channels: ghostwriter::leds::LEDChannels,
     mut rosc: RingOscillator<Enabled>,
 ) -> ! {
     let scheduler = ghostwriter::Scheduler::new(&timer);
@@ -72,24 +72,10 @@ pub fn run(
     let state: Mutex<RefCell<State>> = Mutex::new(RefCell::new(State::Stopped));
 
     let handle_leds = handle_leds(&scheduler, &state, led_channels);
-    let mut handle_leds = pin!(handle_leds);
-
     let handle_usb = handle_usb(&scheduler, &state, &mut rosc);
-    let mut handle_usb = pin!(handle_usb);
-
     let handle_input = handle_input(&scheduler, &state);
-    let mut handle_input = pin!(handle_input);
 
-    let waker = noop_waker();
-    let mut ctx = Context::from_waker(&waker);
-
-    loop {
-        let _: Poll<()> = handle_leds.as_mut().poll(&mut ctx);
-        let _: Poll<()> = handle_usb.as_mut().poll(&mut ctx);
-        let _: Poll<()> = handle_input.as_mut().poll(&mut ctx);
-
-        ghostwriter::wait_for_event();
-    }
+    ghostwriter::run!(handle_leds, handle_usb, handle_input)
 }
 
 // Change state whenever button is pressed

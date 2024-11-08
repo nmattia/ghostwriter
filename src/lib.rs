@@ -9,39 +9,21 @@ use pimoroni_tiny2040 as bsp;
 
 use bsp::hal;
 use bsp::hal::rosc::{Enabled, RingOscillator};
-use bsp::hal::timer::Alarm;
-use bsp::hal::{gpio, pac::interrupt};
 
 // Locking
-use core::cell::RefCell;
-use critical_section::Mutex;
-
-use core::option::Option;
-use core::option::Option::{None, Some};
-use core::pin::Pin;
-use futures::task::{Context, Poll};
-use futures::Future;
 
 use bsp::hal::pac;
 
-use hal::fugit::MicrosDurationU32;
-
+pub mod input;
 pub mod leds;
+pub mod scheduler;
+pub mod sleep;
 pub mod usb;
 
-/// The pin used as an input button. Global value set once by the setup, and then read
-/// once (stolen, taken) from the button interrupt handler.
-type ButtonPin = gpio::Pin<gpio::bank0::Gpio23, gpio::FunctionSio<gpio::SioInput>, gpio::PullUp>;
-static _BUTTON_PIN: Mutex<RefCell<Option<ButtonPin>>> = Mutex::new(RefCell::new(None));
+pub use scheduler::{Duration, Scheduler};
 
-/// Global state shared between the eventloop and the button interrupt handler.
-static BUTTON_DOWN: Mutex<RefCell<Option<Keypress>>> = Mutex::new(RefCell::new(None));
-
-/// The first alarm (see rp2040 datasheet chapter 4.6)
-static ALARM0: Mutex<RefCell<Option<hal::timer::Alarm0>>> = Mutex::new(RefCell::new(None));
-
-/// When the next wakeup is scheduled (if any)
-static NEXT_WAKEUP: Mutex<RefCell<Option<Instant>>> = Mutex::new(RefCell::new(None));
+use input::Keypress;
+use scheduler::Instant;
 
 /// Sets up the ghostwriter silicon. Booooh!
 ///
@@ -84,16 +66,12 @@ pub fn setup() -> (hal::Timer, leds::LEDChannels, RingOscillator<Enabled>) {
 
     // Our button input
     let button_pin = pins.bootsel.into_pull_up_input();
-
-    setup_button(button_pin);
+    input::setup_button(button_pin);
 
     // Prepare timer & alarm
     let mut timer = hal::Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
-    let mut alarm0 = timer.alarm_0().unwrap();
-    alarm0.enable_interrupt();
-    let _ = alarm0.schedule(MicrosDurationU32::secs(1));
-
-    critical_section::with(|cs| ALARM0.borrow(cs).replace(Some(alarm0)));
+    let alarm0 = timer.alarm_0().unwrap();
+    sleep::setup_sleep(alarm0);
 
     // Set up the USB driver
     let usb_clock = clocks.usb_clock;
@@ -121,13 +99,6 @@ pub fn setup() -> (hal::Timer, leds::LEDChannels, RingOscillator<Enabled>) {
     (timer, led_channels, rosc)
 }
 
-// Time related types
-pub type Duration = hal::fugit::Duration<u64, 1, 1000000>;
-pub type Instant = hal::fugit::Instant<u64, 1, 1000000>;
-
-// The "epoch", i.e. t0 when the board booted up
-static BOOT_TIME: Instant = Instant::from_ticks(0);
-
 /// Wait until an event is available to process.
 ///
 /// In practice this registers a wake up alarm if necessary and puts the cortex to
@@ -135,13 +106,7 @@ static BOOT_TIME: Instant = Instant::from_ticks(0);
 /// make more sense in the context of an event loop).
 pub fn wait_for_event() {
     critical_section::with(|cs| {
-        let next_wakeup = NEXT_WAKEUP.borrow(cs).replace(None);
-
-        if let Some(next_wakeup) = next_wakeup {
-            let mut alarm0 = ALARM0.borrow(cs).borrow_mut();
-            let alarm0 = alarm0.as_mut().unwrap();
-            let _ = alarm0.schedule_at(next_wakeup);
-        }
+        sleep::wind_alarm(cs);
 
         // Since both sleep & input wait for an interrupt, we can just put the core to sleep
         // and wait for an interrupt.
@@ -154,167 +119,25 @@ pub fn wait_for_event() {
     });
 }
 
-// Async/await sleep
-pub struct Sleep<'a> {
-    target: Instant,
-    timer: &'a hal::Timer,
-}
+#[macro_export]
+/// A macro that runs and polls ghostwriter futures in a loop
+/// (the future executor)
+macro_rules! run {
+    ( $( $x:ident ),* ) => {
+        {
+        let waker = ::futures::task::noop_waker();
+        let mut ctx = ::futures::task::Context::from_waker(&waker);
 
-impl Future for Sleep<'_> {
-    type Output = ();
+        $(
+        let mut $x = pin!($x);
+        )*
 
-    fn poll(self: Pin<&mut Self>, _ctx: &mut Context<'_>) -> Poll<Self::Output> {
-        let now: Instant = BOOT_TIME + self.timer.get_counter().duration_since_epoch();
-
-        if self.target < now {
-            Poll::Ready(())
-        } else {
-            // If we're not ready, then sleep until either the next scheduled wake up or (if
-            // earlier) our expected wake up.
-            critical_section::with(|cs| {
-                NEXT_WAKEUP.borrow(cs).replace_with(|next_wakeup| {
-                    let next_wakeup = next_wakeup
-                        .map(|next_target| core::cmp::min(self.target, next_target))
-                        .unwrap_or(self.target);
-                    Some(next_wakeup)
-                });
-            });
-
-            Poll::Pending
-        }
-    }
-}
-
-// Input
-
-// Result of a keypress, either down (pressed) or up (released)
-pub enum Keypress {
-    Up,
-    Down,
-}
-
-/// Async/await waiting for user input (button press)
-pub struct Input {}
-
-impl Future for Input {
-    type Output = Keypress;
-
-    fn poll(self: Pin<&mut Self>, _ctx: &mut Context<'_>) -> Poll<Self::Output> {
-        // Check if button has been pressed
-        let was_pressed = critical_section::with(|cs| BUTTON_DOWN.borrow(cs).replace(None));
-
-        // If the button was pressed, we're ready to continue
-        if let Some(kp) = was_pressed {
-            Poll::Ready(kp)
-        } else {
-            Poll::Pending
-        }
-    }
-}
-
-// Wrapper around timer so that poll knows the time
-pub struct Scheduler<'a> {
-    timer: &'a hal::Timer,
-}
-
-impl<'a> Scheduler<'a> {
-    pub fn new(timer: &'a hal::Timer) -> Self {
-        Scheduler { timer }
-    }
-
-    pub fn sleep_ms(&self, v: u64) -> Sleep<'a> {
-        let now: Instant = BOOT_TIME + self.timer.get_counter().duration_since_epoch();
-        let delta: Duration = Duration::millis(v);
-        Sleep {
-            target: now + delta,
-            timer: self.timer,
-        }
-    }
-
-    pub fn wait_for_press(&self) -> Input {
-        Input {}
-    }
-
-    pub async fn wait_for_click(&self) {
-        // Loop until a meaningful sequence of Keydown - Keyup occurs.
-        //
-        // If the sequence happens too fast, pretend this current press didn't happen.
         loop {
-            // Wait for press down
-            match self.wait_for_press().await {
-                Keypress::Up => continue,
-                Keypress::Down => {}
-            }
-            let pressed_at = self.now();
-
-            // Wait for press up
-            match self.wait_for_press().await {
-                Keypress::Up => {}
-                Keypress::Down => continue, // Two key downs, something is off; retry
-            }
-            let released_at = self.now();
-            if (released_at - pressed_at).to_millis() < 50 {
-                // Anything this fast we pretend didn't happen
-                continue;
-            }
-
-            break;
+            $(
+            let _: Poll<()> = $x.as_mut().poll(&mut ctx);
+            )*
+            ::ghostwriter::wait_for_event();
         }
-    }
-
-    pub fn now(&self) -> Duration {
-        self.timer.get_counter().duration_since_epoch()
-    }
-}
-
-/// BUTTON
-
-pub fn setup_button(button_pin: ButtonPin) {
-    // Trigger on the 'falling edge' of the input pin.
-    // This will happen as the button is being pressed
-    button_pin.set_interrupt_enabled(gpio::Interrupt::EdgeLow, true);
-    button_pin.set_interrupt_enabled(gpio::Interrupt::EdgeHigh, true);
-
-    critical_section::with(|cs| {
-        _BUTTON_PIN.borrow(cs).replace(Some(button_pin));
-        BUTTON_DOWN.borrow(cs).replace(None);
-    });
-}
-
-#[interrupt]
-fn IO_IRQ_BANK0() {
-    // The `#[interrupt]` attribute covertly converts this to `&'static mut Option<...>`
-    static mut BUTTON_PIN: Option<ButtonPin> = None;
-
-    // This is one-time lazy initialisation. We steal the global interrupt variables.
-    if BUTTON_PIN.is_none() {
-        critical_section::with(|cs| {
-            *BUTTON_PIN = _BUTTON_PIN.borrow(cs).take();
-        });
-    }
-
-    if let Some(button) = BUTTON_PIN {
-        if button.interrupt_status(gpio::Interrupt::EdgeLow) {
-            button.clear_interrupt(gpio::Interrupt::EdgeLow);
-            critical_section::with(|cs| {
-                BUTTON_DOWN.borrow(cs).replace(Some(Keypress::Down));
-            });
-        } else if button.interrupt_status(gpio::Interrupt::EdgeHigh) {
-            button.clear_interrupt(gpio::Interrupt::EdgeHigh);
-            critical_section::with(|cs| {
-                BUTTON_DOWN.borrow(cs).replace(Some(Keypress::Up));
-            });
         }
-    }
-}
-
-#[interrupt]
-fn TIMER_IRQ_0() {
-    // Clear the interrupt and return. The only point in this is waking up the cortex
-    // from wfi.
-    critical_section::with(|cs| {
-        let mut alarm0 = ALARM0.borrow(cs).borrow_mut();
-        let alarm0 = alarm0.as_mut().unwrap();
-        alarm0.clear_interrupt();
-    })
+    };
 }
