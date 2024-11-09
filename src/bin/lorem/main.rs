@@ -20,8 +20,10 @@ use usbd_hid::descriptor::KeyboardReport;
 
 use core::f64::consts::TAU;
 use core::pin::pin;
+use futures::select_biased;
 use futures::task::Poll;
 use futures::Future;
+use futures::FutureExt;
 
 use rand_distr::{ChiSquared, Distribution, Normal};
 
@@ -35,15 +37,6 @@ mod text;
 enum State {
     Typing,
     Stopped,
-}
-
-impl State {
-    fn toggle(&self) -> State {
-        match self {
-            State::Typing => State::Stopped,
-            State::Stopped => State::Typing,
-        }
-    }
 }
 
 /// Entry point to our bare-metal application.
@@ -65,26 +58,13 @@ pub fn run(
 ) -> ! {
     let scheduler = ghostwriter::Scheduler::new(&timer);
 
-    // The global state
-    // NOTE: the interrupt triggers once at the start (it seems) but because the input handler
-    // has some debouncing (computed from epoch) this doesn't matter and the "press" is not
-    // registered.
+    // The global state (communication between LEDs & main loop)
     let state: Mutex<RefCell<State>> = Mutex::new(RefCell::new(State::Stopped));
 
     let handle_leds = handle_leds(&scheduler, &state, led_channels);
     let handle_usb = handle_usb(&scheduler, &state, &mut rosc);
-    let handle_input = handle_input(&scheduler, &state);
 
-    ghostwriter::run!(handle_leds, handle_usb, handle_input)
-}
-
-// Change state whenever button is pressed
-async fn handle_input<'a>(scheduler: &ghostwriter::Scheduler<'a>, state: &Mutex<RefCell<State>>) {
-    loop {
-        scheduler.wait_for_click().await;
-        // Button was pressed, so toggle the state.
-        critical_section::with(|cs| state.borrow(cs).replace_with(|state| state.toggle()));
-    }
+    ghostwriter::run!(handle_leds, handle_usb)
 }
 
 /// Animate the LEDs based on the state
@@ -197,31 +177,38 @@ async fn handle_usb<'a>(
     let rand_iki = ChiSquared::new(5.0).unwrap();
 
     loop {
-        let on = critical_section::with(|cs| {
-            let f = state.borrow(cs).borrow();
-            f.clone()
-        });
+        // We're stopped and waiting for a click
+        scheduler.wait_for_click().await;
 
-        // Apply state (USB stuff)
-        let c = match on {
-            State::Typing => {
-                let chr = text::TEXT.as_bytes()[n_written];
-                n_written = (n_written + 1) % text::TEXT.len();
-                chr
-            }
-            State::Stopped => {
-                // When stopped, don't write anything.
-                // Wait a couple ms before looping.
-                scheduler.sleep_ms(100).await;
-                continue;
+        // Button was pressed, so notify the LEDs
+        critical_section::with(|cs| state.borrow(cs).replace(State::Typing));
+
+        // Write chars forever (until interrupted)
+        let write = async {
+            loop {
+                let c = {
+                    let chr = text::TEXT.as_bytes()[n_written];
+                    n_written = (n_written + 1) % text::TEXT.len();
+                    chr
+                };
+                let kprd = rand_kprd.sample(rosc) as u64;
+
+                write_char(scheduler, kprd, c).await;
+
+                let iki = 30 + 10 * rand_iki.sample(rosc) as u64;
+                scheduler.sleep_ms(iki).await;
             }
         };
 
-        let kprd = rand_kprd.sample(rosc) as u64;
-        write_char(scheduler, kprd, c).await;
+        // Bias towards the click, so that it's always noticed first
+        select_biased! {
+            () = scheduler.wait_for_click().fuse() => (),
+            () = write.fuse() => (),
+        }
 
-        let iki = 30 + 10 * rand_iki.sample(rosc) as u64;
-        scheduler.sleep_ms(iki).await;
+        // Button was pressed, so release all keys in the keyboard and notify the LEDs
+        release_keys();
+        critical_section::with(|cs| state.borrow(cs).replace(State::Stopped));
     }
 }
 
@@ -237,6 +224,13 @@ async fn write_key<'a>(scheduler: &ghostwriter::Scheduler<'a>, kprd: u64, keycod
         leds: 0,
         keycodes: [keycode, 0, 0, 0, 0, 0],
     };
+    let _ = ghostwriter::usb::push_hid_report(report_keydown);
+    scheduler.sleep_ms(kprd).await;
+    release_keys();
+}
+
+/// Release all keys on the keyboard
+fn release_keys() {
     let report_keyup = KeyboardReport {
         modifier: 0,
         reserved: 0,
@@ -244,7 +238,5 @@ async fn write_key<'a>(scheduler: &ghostwriter::Scheduler<'a>, kprd: u64, keycod
         keycodes: [0x00, 0, 0, 0, 0, 0],
     };
 
-    let _ = ghostwriter::usb::push_hid_report(report_keydown);
-    scheduler.sleep_ms(kprd).await;
     let _ = ghostwriter::usb::push_hid_report(report_keyup);
 }
