@@ -136,6 +136,12 @@ rustup update stable
 rustup target add thumbv6m-none-eabi
 ```
 
+Install the `flip-link` linker (for defmt & stackoverflow protection):
+
+```
+cargo install flip-link
+```
+
 Build the `lorem` firmware:
 
 ```

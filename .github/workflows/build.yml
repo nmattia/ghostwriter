@@ -10,6 +10,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.90.0
         with:
           target: thumbv6m-none-eabi
+      - run: cargo install flip-link
       - run: cargo build --release
       - uses: ./.github/actions/picotool
       - run: cp ./target/thumbv6m-none-eabi/release/lorem lorem.elf

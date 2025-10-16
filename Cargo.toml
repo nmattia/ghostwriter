@@ -22,6 +22,8 @@ futures = { version = "0.3", default-features = false, features = [ "async-await
 libm = "0.2.8"
 rand = { version = "0.8.5", default-features = false }
 rand_distr = { version = "0.4.3", default-features = false }
+defmt = "1.0.1"
+defmt-rtt = "1.1.0"
 
 # Features adapted from rp-hal-boards/pimoroni-tiny2040
 
