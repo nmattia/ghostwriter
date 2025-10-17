@@ -1,4 +1,4 @@
-/// Text (typing) related
+//! Text (typing) related
 
 /// Convert an ASCII char code to a keyboard keycode
 #[allow(clippy::if_same_then_else)]
