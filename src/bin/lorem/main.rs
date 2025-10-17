@@ -5,6 +5,9 @@
 
 use bsp::entry;
 
+use defmt::debug;
+use defmt_rtt as _;
+
 // Device specific
 use pimoroni_tiny2040 as bsp;
 
@@ -45,6 +48,7 @@ enum State {
 /// as soon as all global variables are initialised.
 #[entry]
 fn main() -> ! {
+    debug!("ghostwriter booting");
     let (timer, led_channels, rosc) = ghostwriter::setup();
 
     run(timer, led_channels, rosc)
@@ -177,8 +181,10 @@ async fn handle_usb<'a>(
     let rand_iki = ChiSquared::new(5.0).unwrap();
 
     loop {
+        debug!("ghostwriter waiting for click");
         // We're stopped and waiting for a click
         scheduler.wait_for_click().await;
+        debug!("ghostwriter received click");
 
         // Button was pressed, so notify the LEDs
         critical_section::with(|cs| state.borrow(cs).replace(State::Typing));
@@ -205,10 +211,12 @@ async fn handle_usb<'a>(
             () = scheduler.wait_for_click().fuse() => (),
             () = write.fuse() => (),
         }
+        debug!("ghostwriter releasing keys");
 
         // Button was pressed, so release all keys in the keyboard and notify the LEDs
         release_keys();
         critical_section::with(|cs| state.borrow(cs).replace(State::Stopped));
+        debug!("ghostwriter output stopped");
     }
 }
 
