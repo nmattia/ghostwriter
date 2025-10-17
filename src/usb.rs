@@ -1,3 +1,5 @@
+#![allow(static_mut_refs)]
+
 use panic_halt as _;
 
 // Device specific

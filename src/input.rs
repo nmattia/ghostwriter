@@ -1,3 +1,5 @@
+#![allow(static_mut_refs)]
+
 use core::pin::Pin;
 use futures::task::{Context, Poll};
 
