@@ -53,7 +53,6 @@ impl Future for Input {
 }
 
 /// BUTTON
-
 pub fn setup_button(button_pin: ButtonPin) {
     // Trigger on the 'falling edge' of the input pin.
     // This will happen as the button is being pressed
