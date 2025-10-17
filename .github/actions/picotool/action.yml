@@ -9,7 +9,7 @@ runs:
       with:
         repository: raspberrypi/pico-sdk
         path: pico-sdk
-        ref: efe2103f9b28458a1615ff096054479743ade236
+        ref: a1438dff1d38bd9c65dbd693f0e5db4b9ae91779
 
     # Check out picotool itself
     - name: Checkout picotool
@@ -17,7 +17,7 @@ runs:
       with:
         repository: raspberrypi/picotool
         path: picotool
-        ref: bf33c6ddd756c3961c7a13b000859b71e825ee74
+        ref: 25aa087b2c517b4901874a99536e869d4d27b678
 
     # Make sure we have cmake etc
     - name: Install build dependencies
