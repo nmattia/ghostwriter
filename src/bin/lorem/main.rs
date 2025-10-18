@@ -3,37 +3,40 @@
 #![no_std]
 #![no_main]
 
-use bsp::entry;
-
-use defmt::debug;
-use defmt_rtt as _;
-
-// Device specific
-use pimoroni_tiny2040 as bsp;
-
-use bsp::hal;
-use bsp::hal::rosc::{Enabled, RingOscillator};
+use {defmt_rtt as _, panic_probe as _};
 
 // Locking
 use core::cell::RefCell;
 use critical_section::Mutex;
 
 // USB Human Interface Device (HID) Class support
-use usbd_hid::descriptor::KeyboardReport;
+use usbd_hid::descriptor::{KeyboardReport, SerializedDescriptor};
 
 use core::f64::consts::TAU;
-use core::pin::pin;
-use futures::select_biased;
-use futures::task::Poll;
-use futures::Future;
-use futures::FutureExt;
+
+use defmt::*;
+use embassy_executor::Spawner;
+use embassy_futures::{join::join, select::select};
+use embassy_rp::bind_interrupts;
+use embassy_rp::clocks::RoscRng;
+use embassy_rp::gpio::{Input, Pull};
+use embassy_rp::peripherals::USB;
+use embassy_rp::usb::{Driver, InterruptHandler};
+use embassy_time::{Duration, Instant, Timer};
+use embassy_usb::class::hid;
+use embassy_usb::{Builder, Config};
 
 use rand_distr::{ChiSquared, Distribution, Normal};
 
 use ghostwriter::leds;
-use ghostwriter::Duration;
 
 mod text;
+
+bind_interrupts!(struct Irqs {
+    USBCTRL_IRQ => InterruptHandler<USB>;
+});
+
+type HidWriter<'a> = hid::HidWriter<'a, Driver<'a, USB>, 8>;
 
 // Whether we're typing or not
 #[derive(Clone, PartialEq, Eq)]
@@ -42,41 +45,74 @@ enum State {
     Stopped,
 }
 
-/// Entry point to our bare-metal application.
-///
-/// The `#[entry]` macro ensures the Cortex-M start-up code calls this function
-/// as soon as all global variables are initialised.
-#[entry]
-fn main() -> ! {
-    debug!("ghostwriter booting");
-    let (timer, led_channels, rosc) = ghostwriter::setup();
+#[embassy_executor::main]
+async fn main(_spawner: Spawner) {
+    let p = embassy_rp::init(Default::default());
 
-    run(timer, led_channels, rosc)
-}
+    // Create the driver, from the HAL.
+    let driver = Driver::new(p.USB, Irqs);
 
-// Run the lorem program
-pub fn run(
-    timer: hal::Timer,
-    led_channels: ghostwriter::leds::LEDChannels,
-    mut rosc: RingOscillator<Enabled>,
-) -> ! {
-    let scheduler = ghostwriter::Scheduler::new(&timer);
+    // Create embassy-usb Config
+    let mut config = Config::new(0xc0de, 0xcafe);
+    config.manufacturer = Some("Boo-inc");
+    config.product = Some("Ghostwriter");
+    config.serial_number = Some("0oooo00000");
+
+    // Create embassy-usb DeviceBuilder using the driver and config.
+    // It needs some buffers for building the descriptors.
+    let mut config_descriptor = [0; 256];
+    let mut bos_descriptor = [0; 256];
+    let mut msos_descriptor = [0; 256];
+    let mut control_buf = [0; 64];
+
+    let mut state = hid::State::new();
+
+    let mut builder = Builder::new(
+        driver,
+        config,
+        &mut config_descriptor,
+        &mut bos_descriptor,
+        &mut msos_descriptor,
+        &mut control_buf,
+    );
+
+    // Create classes on the builder.
+    let config = embassy_usb::class::hid::Config {
+        report_descriptor: KeyboardReport::desc(),
+        request_handler: None,
+        poll_ms: 60,
+        max_packet_size: 64,
+    };
+    let mut writer = hid::HidWriter::<_, 8>::new(&mut builder, &mut state, config);
+
+    // Build the builder.
+    let mut usb = builder.build();
+
+    // Run the USB device.
+    let usb_fut = usb.run();
+
+    // Set up the signal pin that will be used to trigger the keyboard.
+    let mut signal_pin = Input::new(p.PIN_23, Pull::None);
+
+    // Enable the schmitt trigger to slightly debounce.
+    signal_pin.set_schmitt(true);
 
     // The global state (communication between LEDs & main loop)
     let state: Mutex<RefCell<State>> = Mutex::new(RefCell::new(State::Stopped));
 
-    let handle_leds = handle_leds(&scheduler, &state, led_channels);
-    let handle_usb = handle_usb(&scheduler, &state, &mut rosc);
+    let led_channels = leds::init_pwm((p.PWM_SLICE1, p.PWM_SLICE2), (p.PIN_18, p.PIN_19, p.PIN_20));
 
-    ghostwriter::run!(handle_leds, handle_usb)
+    // Do stuff with the class!
+    let handle_usb = handle_usb(&mut writer, signal_pin, &state);
+    let handle_leds = handle_leds(&state, led_channels);
+
+    // Run everything concurrently.
+    // If we had made everything `'static` above instead, we could do this using separate tasks instead.
+    join(usb_fut, join(handle_leds, handle_usb)).await;
 }
 
 /// Animate the LEDs based on the state
-async fn handle_leds<'a>(
-    scheduler: &ghostwriter::Scheduler<'a>,
-    state: &Mutex<RefCell<State>>,
-    mut led_channels: crate::leds::LEDChannels,
-) {
+async fn handle_leds(state: &Mutex<RefCell<State>>, mut led_channels: crate::leds::LEDChannels) {
     let read_state = || critical_section::with(|cs| state.borrow(cs).borrow().clone());
 
     #[allow(clippy::eq_op)]
@@ -87,13 +123,13 @@ async fn handle_leds<'a>(
 
     type Color = (f64, f64, f64);
     struct ColorAnimation {
-        started_at: Duration, /* timestamp at which animation was started */
+        started_at: Instant, /* timestamp at which animation was started */
         start_color: Color,
         diff_color: Color,
     }
 
     // Total animation duration
-    const ANIM_DURATION: Duration = Duration::millis(300);
+    const ANIM_DURATION: Duration = Duration::from_millis(300);
 
     // Animation delay (pause between LED adjustments)
     const DELAY_MILLIS: u64 = 50;
@@ -103,11 +139,11 @@ async fn handle_leds<'a>(
     let mut animation: Option<ColorAnimation> = None;
 
     // Last time we updated the color & intensity
-    let mut last_t = scheduler.now();
+    let mut last_t = Instant::now();
     let mut theta = 0.0;
 
     loop {
-        let now = scheduler.now();
+        let now = Instant::now();
         let delta_t = now - last_t;
         last_t = now;
 
@@ -129,7 +165,7 @@ async fn handle_leds<'a>(
         if let Some(ref anim) = animation {
             // between [0,1], linearly interpolated
             let ratio =
-                (now - anim.started_at).to_millis() as f64 / ANIM_DURATION.to_millis() as f64;
+                (now - anim.started_at).as_millis() as f64 / ANIM_DURATION.as_millis() as f64;
             let ratio = libm::fmin(1.0, ratio);
 
             // Apply the diff, proportionally
@@ -152,7 +188,7 @@ async fn handle_leds<'a>(
         };
 
         // How far we are in one blink (intensity follows a sine wave)
-        theta += (delta_t.to_millis() as f64 / period_millis) * TAU;
+        theta += (delta_t.as_millis() as f64 / period_millis) * TAU;
         let intensity = (v_max - v_min) * (0.5 * libm::sin(theta) + 0.5) + v_min;
 
         led_channels.set_rgb(
@@ -163,14 +199,14 @@ async fn handle_leds<'a>(
         last_state = state;
 
         // Wait some time before adjusting color
-        scheduler.sleep_ms(DELAY_MILLIS).await;
+        Timer::after_nanos(DELAY_MILLIS * 1000 * 1000).await;
     }
 }
 
 async fn handle_usb<'a>(
-    scheduler: &ghostwriter::Scheduler<'a>,
+    writer: &mut HidWriter<'a>,
+    mut signal_pin: Input<'a>,
     state: &Mutex<RefCell<State>>,
-    rosc: &mut RingOscillator<Enabled>,
 ) {
     let mut n_written: usize = 0;
 
@@ -183,7 +219,7 @@ async fn handle_usb<'a>(
     loop {
         debug!("ghostwriter waiting for click");
         // We're stopped and waiting for a click
-        scheduler.wait_for_click().await;
+        signal_pin.wait_for_falling_edge().await;
         debug!("ghostwriter received click");
 
         // Button was pressed, so notify the LEDs
@@ -197,48 +233,45 @@ async fn handle_usb<'a>(
                     n_written = (n_written + 1) % text::TEXT.len();
                     chr
                 };
-                let kprd = rand_kprd.sample(rosc) as u64;
+                let kprd = rand_kprd.sample(&mut RoscRng) as u64;
 
-                write_char(scheduler, kprd, c).await;
+                write_char(writer, kprd, c).await;
 
-                let iki = 30 + 10 * rand_iki.sample(rosc) as u64;
-                scheduler.sleep_ms(iki).await;
+                let iki = 30 + 10 * rand_iki.sample(&mut RoscRng) as u64;
+                Timer::after_nanos(iki * 1000 * 1000).await;
             }
         };
 
-        // Bias towards the click, so that it's always noticed first
-        select_biased! {
-            () = scheduler.wait_for_click().fuse() => (),
-            () = write.fuse() => (),
-        }
+        let _ = select(signal_pin.wait_for_falling_edge(), write).await;
+
         debug!("ghostwriter releasing keys");
 
         // Button was pressed, so release all keys in the keyboard and notify the LEDs
-        release_keys();
+        release_keys(writer).await;
         critical_section::with(|cs| state.borrow(cs).replace(State::Stopped));
         debug!("ghostwriter output stopped");
     }
 }
 
-async fn write_char<'a>(scheduler: &ghostwriter::Scheduler<'a>, kprd: u64, chr: u8) {
+async fn write_char<'a>(writer: &mut HidWriter<'a>, kprd: u64, chr: u8) {
     let keycode = text::char_to_keycode(chr);
-    write_key(scheduler, kprd, keycode).await;
+    write_key(writer, kprd, keycode).await;
 }
 
-async fn write_key<'a>(scheduler: &ghostwriter::Scheduler<'a>, kprd: u64, keycode: u8) {
+async fn write_key<'a>(writer: &mut HidWriter<'a>, kprd: u64, keycode: u8) {
     let report_keydown = KeyboardReport {
         modifier: 0,
         reserved: 0,
         leds: 0,
         keycodes: [keycode, 0, 0, 0, 0, 0],
     };
-    let _ = ghostwriter::usb::push_hid_report(report_keydown);
-    scheduler.sleep_ms(kprd).await;
-    release_keys();
+    let _ = writer.write_serialize(&report_keydown).await;
+    Timer::after_nanos(kprd * 1000 * 1000).await;
+    release_keys(writer).await;
 }
 
 /// Release all keys on the keyboard
-fn release_keys() {
+async fn release_keys<'a>(writer: &mut HidWriter<'a>) {
     let report_keyup = KeyboardReport {
         modifier: 0,
         reserved: 0,
@@ -246,5 +279,5 @@ fn release_keys() {
         keycodes: [0x00, 0, 0, 0, 0, 0],
     };
 
-    let _ = ghostwriter::usb::push_hid_report(report_keyup);
+    let _ = writer.write_serialize(&report_keyup).await;
 }

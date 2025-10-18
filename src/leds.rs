@@ -1,13 +1,3 @@
-use bsp::hal::pwm;
-use bsp::hal::pwm::Slice;
-use bsp::hal::{
-    gpio,
-    gpio::bank0::{Gpio18, Gpio19, Gpio20},
-    gpio::{FunctionNull, PullDown},
-    pac,
-};
-use pimoroni_tiny2040 as bsp;
-
 // Module driving LEDs through PWM.
 //
 // One PWM cycle is driven via the main 133Mhz clock, via a divider. Then,
@@ -18,8 +8,11 @@ use pimoroni_tiny2040 as bsp;
 //
 // See RP2040 datasheet Section 4.5.2.1 (Pulse Width Modulation)
 
-// GPIO traits
-use embedded_hal::pwm::SetDutyCycle;
+use embassy_rp::pwm;
+use embassy_rp::pwm::SetDutyCycle;
+use embassy_rp::Peri;
+
+use embassy_rp::peripherals::{PIN_18, PIN_19, PIN_20, PWM_SLICE1, PWM_SLICE2};
 
 // clock divider: 133Mhz / 256 ~= 500kHz
 const PWM_DIV: u8 = u8::MAX;
@@ -32,11 +25,11 @@ const PWM_TOP: u16 = 512;
 // and RP2040 datasheet PWM channels(4.5.2 Programmer's Model)
 pub struct LEDChannels {
     // GPIO 18 -> PWM 1A
-    red: pwm::Channel<Slice<pwm::Pwm1, pwm::FreeRunning>, pwm::A>,
+    red: pwm::PwmOutput<'static>,
     // GPIO 19 -> PWM 1B
-    green: pwm::Channel<Slice<pwm::Pwm1, pwm::FreeRunning>, pwm::B>,
+    green: pwm::PwmOutput<'static>,
     // GPIO 20 -> PWM 2A
-    blue: pwm::Channel<Slice<pwm::Pwm2, pwm::FreeRunning>, pwm::A>,
+    blue: pwm::PwmOutput<'static>,
 }
 
 impl LEDChannels {
@@ -52,39 +45,33 @@ impl LEDChannels {
 }
 
 type LEDPins = (
-    gpio::Pin<Gpio18, FunctionNull, PullDown>,
-    gpio::Pin<Gpio19, FunctionNull, PullDown>,
-    gpio::Pin<Gpio20, FunctionNull, PullDown>,
+    Peri<'static, PIN_18>,
+    Peri<'static, PIN_19>,
+    Peri<'static, PIN_20>,
 );
 
-pub fn init_pwm(pwm: pac::PWM, resets: &mut pac::RESETS, led_pins: LEDPins) -> LEDChannels {
+pub fn init_pwm(
+    slices: (Peri<'static, PWM_SLICE1>, Peri<'static, PWM_SLICE2>),
+    led_pins: LEDPins,
+) -> LEDChannels {
     // Configure PWM
-    let pwm_slices = pwm::Slices::new(pwm, resets);
-    let mut pwm1 = pwm_slices.pwm1;
-    let mut pwm2 = pwm_slices.pwm2;
+    let (slice1, slice2) = slices;
+
+    let mut c = pwm::Config::default();
 
     // Set up cycle duration
-    pwm1.set_div_int(PWM_DIV);
-    pwm2.set_div_int(PWM_DIV);
-    pwm1.set_top(PWM_TOP);
-    pwm2.set_top(PWM_TOP);
+    c.top = PWM_TOP;
+    c.divider = PWM_DIV.into();
 
-    // NOTE: we 'unwrap' because the error is actually Infallible
-    pwm1.channel_a.set_duty_cycle_fully_on().unwrap();
-    pwm1.channel_b.set_duty_cycle_fully_on().unwrap();
-    pwm2.channel_a.set_duty_cycle_fully_on().unwrap();
+    let slice1_ab = pwm::Pwm::new_output_ab(slice1, led_pins.0, led_pins.1, c.clone());
+    let slice1_ab = slice1_ab.split();
 
-    pwm1.channel_a.output_to(led_pins.0);
-    pwm1.channel_b.output_to(led_pins.1);
-    pwm2.channel_a.output_to(led_pins.2);
+    let red = slice1_ab.0.unwrap();
+    let green = slice1_ab.1.unwrap();
+    let blue = pwm::Pwm::new_output_a(slice2, led_pins.2, c.clone())
+        .split()
+        .0
+        .unwrap();
 
-    // Enable as late as possible to avoid flashing
-    pwm1.enable();
-    pwm2.enable();
-
-    LEDChannels {
-        red: pwm1.channel_a,
-        green: pwm1.channel_b,
-        blue: pwm2.channel_a,
-    }
+    LEDChannels { red, green, blue }
 }

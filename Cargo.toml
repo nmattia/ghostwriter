@@ -4,41 +4,37 @@ edition = "2021"
 version = "0.0.0"
 
 [dependencies]
-rp2040-boot2 = { version = "0.3.0", optional = true }
-rp2040-hal = { version = "0.10.0", features = [ "defmt" ] }
 
-cortex-m = "0.7.7"
-cortex-m-rt = { version = "0.7.3", optional = true }
+# Embedded rust dependencies
 
-embedded-hal = "1.0.0"
-panic-halt= "0.2.0"
-critical-section = "1.1.2"
-pimoroni-tiny2040 = "0.7.0"
+# The ARM cortex
+cortex-m = { version = "0.7.6", features = ["inline-asm"] }
+cortex-m-rt = "0.7.0"
 
-usbd-hid = "0.7.0"
-usb-device = "0.3.1"
+# Locking
+critical-section = "1.1"
 
-futures = { version = "0.3", default-features = false, features = [ "async-await" ] }
-libm = "0.2.8"
-rand = { version = "0.8.5", default-features = false }
-rand_distr = { version = "0.4.3", default-features = false }
+# Embassy deps
+embassy-embedded-hal = { version = "0.5.0", features = ["defmt"] }
+embassy-executor = { version = "0.9.0", features = ["arch-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
+embassy-time = { version = "0.5.0", features = ["defmt", "defmt-timestamp-uptime"] }
+embassy-rp = { version = "0.8.0", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp2040"] }
+embassy-usb = { version = "0.5.1", default-features = false, features = ["defmt", "usbd-hid"] }
+embassy-futures = { version = "0.1.2" }
+
+# Logging etc
 defmt = "1.0.1"
-defmt-rtt = "1.1.0"
+defmt-rtt = "1.0.0"
+panic-probe = { version = "1.0.0", features = ["print-defmt"] }
 
-# Features adapted from rp-hal-boards/pimoroni-tiny2040
+# Randomness (for typing out lorem chars)
+rand_distr = { version = "0.4.3", default-features = false }
 
-[features]
-# This is the set of features we enable by default
-default = ["boot2", "rt", "critical-section-impl", "rom-func-cache"]
+usbd-hid = "0.8.1"
+libm = "0.2.15"
 
-# critical section that is safe for multicore use
-critical-section-impl = ["rp2040-hal/critical-section-impl"]
 
-# 2nd stage bootloaders for rp2040
-boot2 = ["rp2040-boot2"]
-
-# Minimal startup / runtime for Cortex-M microcontrollers
-rt = ["cortex-m-rt","rp2040-hal/rt"]
-
-# Memoize(cache) ROM function pointers on first use to improve performance
-rom-func-cache = ["rp2040-hal/rom-func-cache"]
+[profile.release]
+# Enable generation of debug symbols even on release builds
+# (for defmt)
+debug = true
