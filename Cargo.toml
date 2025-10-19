@@ -1,3 +1,6 @@
+[workspace]
+members = [ "twine" ]
+
 [package]
 name = "ghostwriter"
 edition = "2021"
@@ -33,6 +36,7 @@ rand_distr = { version = "0.4.3", default-features = false }
 usbd-hid = "0.8.1"
 libm = "0.2.15"
 
+twine = { path = "./twine" }
 
 [profile.release]
 # Enable generation of debug symbols even on release builds
