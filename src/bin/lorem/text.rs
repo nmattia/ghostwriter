@@ -1,39 +1,20 @@
-//! Text (typing) related
+//! Text related
 
-/// Convert an ASCII char code to a keyboard keycode
-#[allow(clippy::if_same_then_else)]
-#[allow(clippy::manual_range_contains)]
-pub fn char_to_keycode(chr: u8) -> u8 {
-    if chr >= 97 && chr <= 122 {
-        chr - 97 + 4
-    } else if chr == 44 {
-        54
-    } else if chr == 46 {
-        55
-    } else if chr == 32 {
-        44
-    } else if chr == 10 {
-        40
-    } else if chr == 39 {
-        52
-    } else if chr == 33 {
-        51 // fake exlamation mark
-    } else if chr == 58 {
-        51 // fake colon (:)
-    } else {
-        0
-    }
-}
+/// Generated with lipsum generator: https://lipsum-generator.netlify.app
+/// We use bytes to avoid non-ASCII surprises
+pub const TEXT: &[u8] = b"
+Lorem ipsum dolor sit amet laoreet suspendisse. Finibus sociosqu commodo mauris lorem nisi class. Porta inceptos lacinia orci taciti ex dignissim ipsum. Vel euismod adipiscing nibh montes porta eu lacinia viverra ultricies. Litora euismod consectetuer taciti magna nascetur. Lobortis posuere sodales natoque suscipit pretium elit dictumst tempus eu.
 
-pub const TEXT: &str = "
-lorem ipsum odor amet, consectetuer adipiscing elit. vitae sapien adipiscing sem taciti bibendum aenean platea montes bibendum. pharetra sem ultrices vitae quis bibendum augue ligula. nibh fermentum lacinia purus molestie sociosqu felis est. hendrerit sollicitudin eu sodales ullamcorper eros bibendum morbi. integer class cursus suscipit commodo tempor nec. nostra suscipit ipsum semper elementum habitant ultrices posuere. auctor maximus venenatis turpis vitae enim; dis potenti dictumst. libero consequat iaculis magna, sollicitudin feugiat praesent tempus.
+Lacinia ligula praesent torquent porttitor nostra. Euismod molestie pede elit cras neque class etiam faucibus in dui venenatis. Hendrerit quam maecenas praesent phasellus tellus ridiculus aliquet nostra curae orci bibendum. Ad volutpat pulvinar cursus mollis justo aliquam placerat interdum. Interdum turpis ipsum nunc porta habitasse eleifend mattis eget lacus tristique senectus. Urna vitae amet risus dictumst faucibus nulla ligula velit ipsum nam habitasse. Letius urna ad convallis elementum inceptos torquent lacus cubilia orci. Bibendum nec nisi netus duis praesent scelerisque ridiculus.
 
-nulla sem erat sagittis taciti maximus fusce, at in dis. fringilla venenatis vestibulum eu nostra inceptos morbi. rhoncus cubilia adipiscing mauris ex mus montes felis primis. sed bibendum eleifend senectus gravida; ex pulvinar magnis aptent. arcu cras sagittis libero penatibus nunc rutrum vestibulum. habitant class ante semper class dignissim; ante a aenean eu. arcu suspendisse pellentesque netus bibendum egestas.
+Fusce litora mattis nisl vestibulum lacinia nunc penatibus accumsan vehicula metus integer. Scelerisque ac sociosqu placerat sollicitudin ultricies non. Cursus massa magna quam natoque eget. Orci viverra fusce ipsum aliquet facilisis condimentum malesuada tincidunt suscipit fames laoreet. Fringilla pretium at amet mus neque facilisi massa. Arcu est praesent sapien ullamcorper a nascetur. Senectus hac maecenas aliquet id etiam ex sagittis. Porta rhoncus ut fames semper commodo.
 
-convallis aenean lectus maecenas mollis at aenean. litora risus malesuada nullam eu cursus mus mauris mauris vulputate. erat tincidunt arcu justo interdum proin praesent tempus. mollis sapien vestibulum ante suspendisse cras primis ligula lectus nam. dapibus natoque sit gravida dui pellentesque nostra. mi pulvinar sit; turpis mollis justo leo habitant vestibulum sed.
+Posuere eu parturient pharetra vitae suspendisse habitasse feugiat nostra. Sagittis euismod in dignissim suscipit id lorem aliquam augue consectetuer dui. Dis magna nunc posuere fusce purus eget porttitor ipsum litora elementum tempus. Faucibus tristique mollis pretium leo purus consectetur phasellus. Fermentum nam volutpat hendrerit cursus vel risus nullam arcu ultricies enim porta. Curabitur pharetra cras habitasse sed etiam. Neque gravida donec pulvinar nisi aliquam eros bibendum si ullamcorper.
 
-elit congue scelerisque lectus phasellus consequat lacinia nulla. hendrerit platea nostra quisque lorem laoreet. orci nibh felis blandit lacus; vulputate nascetur morbi. platea metus phasellus habitant, dignissim felis aenean imperdiet. nascetur nisl mauris elementum auctor mus non ut arcu neque. morbi egestas curae ultricies eu morbi accumsan lacus vitae. efficitur lorem sodales pellentesque quisque commodo lacinia augue. elementum massa hendrerit imperdiet imperdiet varius maecenas.
+Cras vehicula suspendisse posuere sollicitudin lacus fusce sagittis. Interdum magnis mauris pulvinar iaculis morbi inceptos pede habitasse. Porttitor cursus vehicula malesuada urna donec semper ac consequat bibendum vel volutpat. Phasellus dictum sem libero imperdiet nullam mattis platea luctus.
 
-libero quis sociosqu fringilla mauris; praesent fringilla praesent molestie. consequat tellus cras ullamcorper maecenas inceptos diam pellentesque a cursus. quam tincidunt conubia primis praesent maximus torquent. integer dictum senectus tellus porta lacinia maecenas quis potenti. pretium varius ornare lacus semper nullam ligula, luctus amet! porttitor auctor eros aliquam ex nibh; dolor semper dapibus. tincidunt ligula montes vehicula tellus ut habitasse massa.
+Letius dapibus a ornare purus placerat praesent fames eget vel imperdiet. Molestie velit nulla laoreet suspendisse scelerisque hendrerit congue accumsan. Elit mattis habitant tempus aenean curabitur ac suspendisse. Etiam primis semper eget finibus dui integer ornare platea accumsan senectus suscipit.
+
+Duis dictum vulputate consectetuer si curae purus tellus justo inceptos. Viverra vivamus penatibus nascetur bibendum praesent netus nulla rhoncus. Pretium proin velit consequat gravida nibh faucibus rhoncus senectus ac suspendisse ut. Lacinia odio vivamus congue leo urna risus. Aenean fames auctor dis tincidunt tellus. Sem pharetra cras in erat nostra nisi. Diam facilisi curae aenean commodo vehicula augue. A id nunc etiam iaculis auctor habitasse.
 
 ";
