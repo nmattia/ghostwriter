@@ -229,13 +229,15 @@ async fn handle_usb<'a>(
         let write = async {
             loop {
                 let c = {
-                    let chr = text::TEXT.as_bytes()[n_written];
+                    let chr = text::TEXT[n_written];
                     n_written = (n_written + 1) % text::TEXT.len();
                     chr
                 };
                 let kprd = rand_kprd.sample(&mut RoscRng) as u64;
 
-                write_char(writer, kprd, c).await;
+                ghostwriter::keyboard::write_ascii_byte(writer, c).await;
+                Timer::after_nanos(kprd * 1000 * 1000).await;
+                ghostwriter::keyboard::release_keys(writer).await;
 
                 let iki = 30 + 10 * rand_iki.sample(&mut RoscRng) as u64;
                 Timer::after_nanos(iki * 1000 * 1000).await;
@@ -247,37 +249,8 @@ async fn handle_usb<'a>(
         debug!("ghostwriter releasing keys");
 
         // Button was pressed, so release all keys in the keyboard and notify the LEDs
-        release_keys(writer).await;
+        ghostwriter::keyboard::release_keys(writer).await;
         critical_section::with(|cs| state.borrow(cs).replace(State::Stopped));
         debug!("ghostwriter output stopped");
     }
-}
-
-async fn write_char<'a>(writer: &mut HidWriter<'a>, kprd: u64, chr: u8) {
-    let keycode = text::char_to_keycode(chr);
-    write_key(writer, kprd, keycode).await;
-}
-
-async fn write_key<'a>(writer: &mut HidWriter<'a>, kprd: u64, keycode: u8) {
-    let report_keydown = KeyboardReport {
-        modifier: 0,
-        reserved: 0,
-        leds: 0,
-        keycodes: [keycode, 0, 0, 0, 0, 0],
-    };
-    let _ = writer.write_serialize(&report_keydown).await;
-    Timer::after_nanos(kprd * 1000 * 1000).await;
-    release_keys(writer).await;
-}
-
-/// Release all keys on the keyboard
-async fn release_keys<'a>(writer: &mut HidWriter<'a>) {
-    let report_keyup = KeyboardReport {
-        modifier: 0,
-        reserved: 0,
-        leds: 0,
-        keycodes: [0x00, 0, 0, 0, 0, 0],
-    };
-
-    let _ = writer.write_serialize(&report_keyup).await;
 }
