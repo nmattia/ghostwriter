@@ -11,7 +11,13 @@ jobs:
         with:
           target: thumbv6m-none-eabi
       - run: cargo install flip-link
-      - run: cargo build --release
+      - run: |
+          cargo build --release
+          # tests for the twine crate
+          cargo test --target "$(rustc -vV | grep host | awk '{ print $2; }')" -p twine
+        env:
+          RUSTC_BOOTSTRAP: 1 # required for the cyoa build
+
       - uses: ./.github/actions/picotool
       - run: cp ./target/thumbv6m-none-eabi/release/lorem lorem.elf
       - run: picotool uf2 convert ./lorem.elf lorem.uf2
@@ -24,3 +30,15 @@ jobs:
         with:
           name: lorem.elf
           path: ./lorem.elf
+
+      - run: cp ./target/thumbv6m-none-eabi/release/cyoa cyoa.elf
+      - run: picotool uf2 convert ./cyoa.elf cyoa.uf2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cyoa.uf2
+          path: ./cyoa.uf2
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cyoa.elf
+          path: ./cyoa.elf

@@ -2,7 +2,7 @@
 
 use embassy_rp::peripherals::USB;
 use embassy_rp::usb::Driver;
-use embassy_time::Timer;
+use embassy_time::{Duration, Timer};
 use embassy_usb::class::hid;
 use usbd_hid::descriptor::KeyboardReport;
 
@@ -21,7 +21,7 @@ pub async fn write_ascii_byte<'a>(writer: &mut HidWriter<'a>, chr: u8) {
             keycodes: [0, 0, 0, 0, 0, 0],
         };
         let _ = writer.write_serialize(&report_shift).await;
-        Timer::after_nanos(100 * 1000 * 1000).await;
+        Timer::after(Duration::from_millis(30)).await;
     }
 
     let report_char = KeyboardReport {
@@ -49,6 +49,7 @@ pub fn char_to_keycode(chr: u8) -> (u8, bool) {
         '!' => (30, true),
         '\n' => (40, false),
         ' ' => (44, false),
+        '-' => (45, false),
         ':' => (51, true),
         '\'' => (52, false),
         ',' => (54, false),
@@ -72,4 +73,24 @@ pub const ALL_KEYS_UP: KeyboardReport = KeyboardReport {
 /// Release all keys on the keyboard
 pub async fn release_keys<'a>(writer: &mut HidWriter<'a>) {
     let _ = writer.write_serialize(&ALL_KEYS_UP).await;
+}
+
+/// Write an entire string
+pub async fn write_str<'a>(writer: &mut HidWriter<'a>, s: &'a str, delay: Duration) {
+    let total = s.len();
+    let mut ix = 0;
+    let bytes = s.as_bytes();
+
+    while ix < total {
+        let chr = bytes[ix];
+
+        ix += 1;
+
+        write_ascii_byte(writer, chr).await;
+
+        Timer::after(delay).await;
+
+        release_keys(writer).await;
+        Timer::after(delay).await;
+    }
 }

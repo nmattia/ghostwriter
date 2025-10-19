@@ -676,6 +676,7 @@ dependencies = [
  "libm",
  "panic-probe",
  "rand_distr",
+ "twine",
  "usbd-hid",
 ]
 
@@ -723,6 +724,12 @@ dependencies = [
  "hash32",
  "stable_deref_trait",
 ]
+
+[[package]]
+name = "htmlparser"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48ce8546b993eaf241d69ded33b1be6d205dd9857ec879d9d18bd05d3676e144"
 
 [[package]]
 name = "ident_case"
@@ -1357,6 +1364,13 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.106",
+]
+
+[[package]]
+name = "twine"
+version = "0.1.0"
+dependencies = [
+ "htmlparser",
 ]
 
 [[package]]
