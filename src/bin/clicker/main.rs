@@ -76,11 +76,11 @@ async fn main(_spawner: Spawner) {
     // Enable the schmitt trigger to slightly debounce.
     signal_pin.set_schmitt(true);
 
-    let play_fut = play(&mut writer, signal_pin);
+    let click_fut = click(&mut writer, signal_pin);
 
     // Run everything concurrently.
     // If we had made everything `'static` above instead, we could do this using separate tasks instead.
-    join(usb_fut, play_fut).await;
+    join(usb_fut, click_fut).await;
 }
 
 const SPACE: KeyboardReport = KeyboardReport {
@@ -97,7 +97,7 @@ const ENTER: KeyboardReport = KeyboardReport {
     keycodes: [40, 0, 0, 0, 0, 0],
 };
 
-async fn play<'a>(writer: &mut HidWriter<'a>, mut signal_pin: Input<'a>) {
+async fn click<'a>(writer: &mut HidWriter<'a>, mut signal_pin: Input<'a>) {
     loop {
         signal_pin.wait_for_falling_edge().await;
 

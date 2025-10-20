@@ -125,7 +125,7 @@ const UP: KeyboardReport = KeyboardReport {
     keycodes: [82, 0, 0, 0, 0, 0],
 };
 const SPACE: KeyboardReport = KeyboardReport {
-    modifier: 2,
+    modifier: 0,
     reserved: 0,
     leds: 0,
     keycodes: [44, 0, 0, 0, 0, 0],
