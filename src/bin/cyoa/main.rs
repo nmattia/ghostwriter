@@ -9,7 +9,6 @@ use {defmt_rtt as _, panic_probe as _};
 // USB Human Interface Device (HID) Class support
 use usbd_hid::descriptor::{KeyboardReport, SerializedDescriptor};
 
-// use defmt::*;
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
 use embassy_rp::bind_interrupts;

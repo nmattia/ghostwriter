@@ -22,9 +22,8 @@ use embassy_rp::clocks::RoscRng;
 use embassy_rp::gpio::{Input, Pull};
 use embassy_rp::peripherals::USB;
 use embassy_rp::usb::{Driver, InterruptHandler};
-use embassy_time::{Duration, Instant, Timer};
+use embassy_time::{Duration, Instant, Ticker, Timer};
 use embassy_usb::class::hid;
-use embassy_usb::{Builder, Config};
 
 use rand_distr::{ChiSquared, Distribution, Normal};
 
@@ -53,10 +52,12 @@ async fn main(_spawner: Spawner) {
     let driver = Driver::new(p.USB, Irqs);
 
     // Create embassy-usb Config
-    let mut config = Config::new(0xc0de, 0xcafe);
+    let mut config = embassy_usb::Config::new(0xc0de, 0xcafe);
     config.manufacturer = Some("Boo-inc");
     config.product = Some("Ghostwriter");
     config.serial_number = Some("0oooo00000");
+
+    let mut hid_state = hid::State::new(); // HID state
 
     // Create embassy-usb DeviceBuilder using the driver and config.
     // It needs some buffers for building the descriptors.
@@ -64,10 +65,7 @@ async fn main(_spawner: Spawner) {
     let mut bos_descriptor = [0; 256];
     let mut msos_descriptor = [0; 256];
     let mut control_buf = [0; 64];
-
-    let mut state = hid::State::new();
-
-    let mut builder = Builder::new(
+    let mut builder = embassy_usb::Builder::new(
         driver,
         config,
         &mut config_descriptor,
@@ -83,26 +81,27 @@ async fn main(_spawner: Spawner) {
         poll_ms: 60,
         max_packet_size: 64,
     };
-    let mut writer = hid::HidWriter::<_, 8>::new(&mut builder, &mut state, config);
 
-    // Build the builder.
+    let mut writer = hid::HidWriter::<_, 8>::new(&mut builder, &mut hid_state, config);
+
+    // Build the builder and run the device.
     let mut usb = builder.build();
-
-    // Run the USB device.
     let usb_fut = usb.run();
 
     // Set up the signal pin that will be used to trigger the keyboard.
-    let mut signal_pin = Input::new(p.PIN_23, Pull::None);
+    let signal_pin = {
+        let mut signal_pin = Input::new(p.PIN_23, Pull::None);
+        // Enable the schmitt trigger to slightly debounce.
+        signal_pin.set_schmitt(true);
+        signal_pin
+    };
 
-    // Enable the schmitt trigger to slightly debounce.
-    signal_pin.set_schmitt(true);
+    let led_channels = leds::init_pwm((p.PWM_SLICE1, p.PWM_SLICE2), (p.PIN_18, p.PIN_19, p.PIN_20));
 
     // The global state (communication between LEDs & main loop)
     let state: Mutex<RefCell<State>> = Mutex::new(RefCell::new(State::Stopped));
 
-    let led_channels = leds::init_pwm((p.PWM_SLICE1, p.PWM_SLICE2), (p.PIN_18, p.PIN_19, p.PIN_20));
-
-    // Do stuff with the class!
+    // Lorem-specific functions
     let handle_usb = handle_usb(&mut writer, signal_pin, &state);
     let handle_leds = handle_leds(&state, led_channels);
 
@@ -115,80 +114,21 @@ async fn main(_spawner: Spawner) {
 async fn handle_leds(state: &Mutex<RefCell<State>>, mut led_channels: crate::leds::LEDChannels) {
     let read_state = || critical_section::with(|cs| state.borrow(cs).borrow().clone());
 
+    // State specific data
     #[allow(clippy::eq_op)]
-    let state_color = |state: &State| match state {
-        State::Typing => (1.0 / 1.0, 1.0 / 9.0, 1.0 / 1.0),
-        State::Stopped => (1.0 / 3.0, 1.0 / 5.0, 1.0 / 4.0),
+    let state_data = |state: &State| match state {
+        State::Typing => ((1.0 / 1.0, 1.0 / 9.0, 1.0 / 1.0), 0.0, 1.0, 1000.0),
+        State::Stopped => ((1.0 / 3.0, 1.0 / 5.0, 1.0 / 4.0), 0.3, 0.5, 2000.0),
     };
 
-    type Color = (f64, f64, f64);
-    struct ColorAnimation {
-        started_at: Instant, /* timestamp at which animation was started */
-        start_color: Color,
-        diff_color: Color,
-    }
-
-    // Total animation duration
-    const ANIM_DURATION: Duration = Duration::from_millis(300);
-
-    // Animation delay (pause between LED adjustments)
-    const DELAY_MILLIS: u64 = 50;
-
-    let mut last_state = read_state();
-    let mut color = state_color(&last_state);
-    let mut animation: Option<ColorAnimation> = None;
-
-    // Last time we updated the color & intensity
-    let mut last_t = Instant::now();
-    let mut theta = 0.0;
+    // Update the LEDs every 50ms
+    let mut ticker = Ticker::every(Duration::from_millis(50));
 
     loop {
-        let now = Instant::now();
-        let delta_t = now - last_t;
-        last_t = now;
-
-        let state = read_state();
-
-        // If the state changed, start a new animation
-        if state != last_state {
-            let (r_, g_, b_) = state_color(&state);
-            let (r, g, b) = color;
-
-            animation = Some(ColorAnimation {
-                started_at: now,
-                start_color: color,
-                diff_color: (r_ - r, g_ - g, b_ - b),
-            });
-        }
-
-        // Update the color, if necessary
-        if let Some(ref anim) = animation {
-            // between [0,1], linearly interpolated
-            let ratio =
-                (now - anim.started_at).as_millis() as f64 / ANIM_DURATION.as_millis() as f64;
-            let ratio = libm::fmin(1.0, ratio);
-
-            // Apply the diff, proportionally
-            color = (
-                anim.start_color.0 + ratio * anim.diff_color.0,
-                anim.start_color.1 + ratio * anim.diff_color.1,
-                anim.start_color.2 + ratio * anim.diff_color.2,
-            );
-
-            // Animation end
-            if ratio >= 1.0 {
-                animation = None;
-            }
-        };
-
-        // State specific data
-        let (v_min, v_max, period_millis) = match state {
-            State::Typing => (0.0, 1.0, 1000.0),
-            State::Stopped => (0.3, 0.5, 2000.0),
-        };
+        let (color, v_min, v_max, period_millis) = state_data(&read_state());
 
         // How far we are in one blink (intensity follows a sine wave)
-        theta += (delta_t.as_millis() as f64 / period_millis) * TAU;
+        let theta = (Instant::now().as_millis() as f64 / period_millis) * TAU;
         let intensity = (v_max - v_min) * (0.5 * libm::sin(theta) + 0.5) + v_min;
 
         led_channels.set_rgb(
@@ -196,10 +136,9 @@ async fn handle_leds(state: &Mutex<RefCell<State>>, mut led_channels: crate::led
             intensity * color.1,
             intensity * color.2,
         );
-        last_state = state;
 
         // Wait some time before adjusting color
-        Timer::after_nanos(DELAY_MILLIS * 1000 * 1000).await;
+        ticker.next().await;
     }
 }
 
@@ -234,18 +173,17 @@ async fn handle_usb<'a>(
                     chr
                 };
                 let kprd = rand_kprd.sample(&mut RoscRng) as u64;
+                let iki = 30 + 10 * rand_iki.sample(&mut RoscRng) as u64;
 
                 ghostwriter::keyboard::write_ascii_byte(writer, c).await;
-                Timer::after_nanos(kprd * 1000 * 1000).await;
+                Timer::after(Duration::from_millis(kprd)).await;
                 ghostwriter::keyboard::release_keys(writer).await;
-
-                let iki = 30 + 10 * rand_iki.sample(&mut RoscRng) as u64;
-                Timer::after_nanos(iki * 1000 * 1000).await;
+                Timer::after(Duration::from_millis(iki)).await;
             }
         };
 
-        let _ = select(signal_pin.wait_for_falling_edge(), write).await;
-
+        // Write until the button is pressed
+        let _ = select(write, signal_pin.wait_for_falling_edge()).await;
         debug!("ghostwriter releasing keys");
 
         // Button was pressed, so release all keys in the keyboard and notify the LEDs
