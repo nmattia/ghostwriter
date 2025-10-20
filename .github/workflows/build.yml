@@ -15,8 +15,6 @@ jobs:
           cargo build --release
           # tests for the twine crate
           cargo test --target "$(rustc -vV | grep host | awk '{ print $2; }')" -p twine
-        env:
-          RUSTC_BOOTSTRAP: 1 # required for the cyoa build
 
       - uses: ./.github/actions/picotool
       - run: cp ./target/thumbv6m-none-eabi/release/lorem lorem.elf

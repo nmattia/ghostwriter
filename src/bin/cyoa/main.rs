@@ -1,7 +1,5 @@
 //! An HID/Keyboard device that plays a Choose Your Own Adventure game
 
-#![feature(const_index)] // required by 'story.rs'
-#![feature(const_trait_impl)] // required by 'story.rs'
 #![no_std]
 #![no_main]
 
@@ -11,7 +9,6 @@ use {defmt_rtt as _, panic_probe as _};
 // USB Human Interface Device (HID) Class support
 use usbd_hid::descriptor::{KeyboardReport, SerializedDescriptor};
 
-// use defmt::*;
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
 use embassy_rp::bind_interrupts;
@@ -24,7 +21,7 @@ use embassy_usb::{Builder, Config};
 
 use ghostwriter::keyboard::write_str;
 
-mod story;
+const STORY: &str = include_str!("ghostwriter.html");
 
 bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => InterruptHandler<USB>;
@@ -128,16 +125,16 @@ const UP: KeyboardReport = KeyboardReport {
     keycodes: [82, 0, 0, 0, 0, 0],
 };
 const SPACE: KeyboardReport = KeyboardReport {
-    modifier: 2,
+    modifier: 0,
     reserved: 0,
     leds: 0,
     keycodes: [44, 0, 0, 0, 0, 0],
 };
 
 async fn play<'a>(writer: &mut HidWriter<'a>, mut signal_pin: Input<'a>) {
-    let start_passage_id = twine::find_start_passage_id(story::DATA);
+    let start_passage_id = twine::find_start_passage_id(STORY);
 
-    let mut passage = twine::find_passage_text_by_id(story::DATA, start_passage_id);
+    let mut passage = twine::find_passage_text_by_id(STORY, start_passage_id);
 
     signal_pin.wait_for_falling_edge().await;
 
@@ -153,7 +150,7 @@ async fn play<'a>(writer: &mut HidWriter<'a>, mut signal_pin: Input<'a>) {
 
         // Then offer the next passage selection
         let res = select_passage_link(writer, &mut signal_pin, passage).await;
-        passage = twine::find_passage_text_by_name(story::DATA, res);
+        passage = twine::find_passage_text_by_name(STORY, res);
     }
 }
 
