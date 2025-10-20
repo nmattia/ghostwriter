@@ -1,11 +1,5 @@
 # Hacking
 
-The binary `cyoa` requires nightly rust:
-
-```
-export RUSTC_BOOTSTRAP=1
-```
-
 Build the code:
 
 ```

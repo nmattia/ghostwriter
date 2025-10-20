@@ -13,5 +13,3 @@ jobs:
           components: clippy
       # Use -D warnings to error out on warnings
       - run: cargo clippy -- -D warnings
-        env:
-          RUSTC_BOOTSTRAP: 1 # required for the cyoa build

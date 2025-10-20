@@ -1,7 +1,5 @@
 //! An HID/Keyboard device that plays a Choose Your Own Adventure game
 
-#![feature(const_index)] // required by 'story.rs'
-#![feature(const_trait_impl)] // required by 'story.rs'
 #![no_std]
 #![no_main]
 
@@ -24,7 +22,7 @@ use embassy_usb::{Builder, Config};
 
 use ghostwriter::keyboard::write_str;
 
-mod story;
+const STORY: &str = include_str!("ghostwriter.html");
 
 bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => InterruptHandler<USB>;
@@ -135,9 +133,9 @@ const SPACE: KeyboardReport = KeyboardReport {
 };
 
 async fn play<'a>(writer: &mut HidWriter<'a>, mut signal_pin: Input<'a>) {
-    let start_passage_id = twine::find_start_passage_id(story::DATA);
+    let start_passage_id = twine::find_start_passage_id(STORY);
 
-    let mut passage = twine::find_passage_text_by_id(story::DATA, start_passage_id);
+    let mut passage = twine::find_passage_text_by_id(STORY, start_passage_id);
 
     signal_pin.wait_for_falling_edge().await;
 
@@ -153,7 +151,7 @@ async fn play<'a>(writer: &mut HidWriter<'a>, mut signal_pin: Input<'a>) {
 
         // Then offer the next passage selection
         let res = select_passage_link(writer, &mut signal_pin, passage).await;
-        passage = twine::find_passage_text_by_name(story::DATA, res);
+        passage = twine::find_passage_text_by_name(STORY, res);
     }
 }
 
