@@ -16,7 +16,7 @@ Adapted where relevant.
   <h3 align="center">Ghostwriter</h3>
 
   <p align="center">
-    A 3D-printed USB macropad based on the <a href="https://shop.pimoroni.com/products/tiny-2040">Tiny 2040</a>, with customizable <a href="https://www.rust-lang.org">Rust</a> firmware.
+    A 3D-printed, 1-key keyboard based on the <a href="https://shop.pimoroni.com/products/tiny-2040">Tiny 2040</a>, with customizable <a href="https://www.rust-lang.org">Rust</a> firmware.
     <br />
     <a href="https://github.com/nmattia/ghostwriter#getting-started"><strong>Getting Started »</strong></a>
     <br />
