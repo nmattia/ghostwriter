@@ -8,6 +8,7 @@ use {defmt_rtt as _, panic_probe as _};
 // USB Human Interface Device (HID) Class support
 use usbd_hid::descriptor::{KeyboardReport, SerializedDescriptor};
 
+use defmt::*;
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
 use embassy_rp::bind_interrupts;
@@ -17,6 +18,8 @@ use embassy_rp::usb::{Driver, InterruptHandler};
 use embassy_time::{Duration, Timer};
 use embassy_usb::class::hid;
 use embassy_usb::{Builder, Config};
+
+use ghostwriter::leds;
 
 bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => InterruptHandler<USB>;
@@ -76,11 +79,15 @@ async fn main(_spawner: Spawner) {
     // Enable the schmitt trigger to slightly debounce.
     signal_pin.set_schmitt(true);
 
-    let click_fut = click(&mut writer, signal_pin);
+    let led_slices = leds::init_pwm((p.PWM_SLICE1, p.PWM_SLICE2), (p.PIN_18, p.PIN_19, p.PIN_20));
+    let signal = leds::Signal::new();
+
+    let leds_fut = leds::animate_leds(&signal, led_slices);
+    let click_fut = click(&mut writer, signal_pin, &signal);
+    let app_fut = join(click_fut, leds_fut);
 
     // Run everything concurrently.
-    // If we had made everything `'static` above instead, we could do this using separate tasks instead.
-    join(usb_fut, click_fut).await;
+    join(usb_fut, app_fut).await;
 }
 
 const SPACE: KeyboardReport = KeyboardReport {
@@ -97,10 +104,38 @@ const ENTER: KeyboardReport = KeyboardReport {
     keycodes: [40, 0, 0, 0, 0, 0],
 };
 
-async fn click<'a>(writer: &mut HidWriter<'a>, mut signal_pin: Input<'a>) {
+/// Waiting for user input
+const IDLE_ANIMATION: leds::Animation = leds::Animation {
+    #[allow(clippy::eq_op)]
+    color: (1.0 / 3.0, 1.0 / 5.0, 1.0 / 4.0),
+    bounds: (0.3, 0.8),
+    period: Duration::from_secs(2),
+};
+
+/// Pressed, waiting to see if short or long
+const PRESSED_ANIMATION: leds::Animation = leds::Animation {
+    #[allow(clippy::eq_op)]
+    color: (1.0 / 1.0, 1.0 / 9.0, 1.0 / 1.0),
+    bounds: (0.0, 1.0),
+    period: Duration::from_secs(1),
+};
+
+/// Pressed timed out, enter was sent
+const ENTER_TRIGGERED_ANIMATION: leds::Animation = leds::Animation {
+    #[allow(clippy::eq_op)]
+    color: (1.0 / 1.0, 5.0 / 9.0, 0.3 / 1.0),
+    bounds: (1.0, 1.0),
+    period: Duration::from_secs(1), /* doesn't matter since bounds at the same */
+};
+
+async fn click<'a>(writer: &mut HidWriter<'a>, mut signal_pin: Input<'a>, signal: &leds::Signal) {
     loop {
+        debug!("ghostwriter clicker waiting for press");
+        signal.signal(IDLE_ANIMATION);
         signal_pin.wait_for_falling_edge().await;
 
+        debug!("ghostwriter clicker pressed, waiting for release");
+        signal.signal(PRESSED_ANIMATION);
         if embassy_time::with_timeout(
             Duration::from_millis(600),
             signal_pin.wait_for_rising_edge(),
@@ -108,17 +143,18 @@ async fn click<'a>(writer: &mut HidWriter<'a>, mut signal_pin: Input<'a>) {
         .await
         .is_err()
         {
+            debug!("ghostwriter clicker release timed out, ENTER");
+            signal.signal(ENTER_TRIGGERED_ANIMATION);
             let _ = writer.write_serialize(&ENTER).await;
-            Timer::after(DELAY).await;
-            ghostwriter::keyboard::release_keys(writer).await;
-            // 1 sec debounce delay
-            Timer::after(Duration::from_secs(1)).await;
         } else {
+            debug!("ghostwriter clicker released, SPACE");
             let _ = writer.write_serialize(&SPACE).await;
-            Timer::after(DELAY).await;
-            ghostwriter::keyboard::release_keys(writer).await;
-            Timer::after(DELAY).await;
         }
+        Timer::after(DELAY).await;
+        ghostwriter::keyboard::release_keys(writer).await;
+        Timer::after(DELAY).await;
+
+        signal_pin.wait_for_high().await; // workaround for https://github.com/embassy-rs/embassy/issues/4790
     }
 }
 

@@ -37,6 +37,7 @@ usbd-hid = "0.8.1"
 libm = "0.2.15"
 
 twine = { path = "./twine" }
+embassy-sync = { version = "0.7.2", default-features = false, features = [ "defmt" ] }
 
 [profile.release]
 # Enable generation of debug symbols even on release builds

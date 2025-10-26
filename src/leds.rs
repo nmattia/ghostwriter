@@ -14,16 +14,31 @@ use embassy_rp::Peri;
 
 use embassy_rp::peripherals::{PIN_18, PIN_19, PIN_20, PWM_SLICE1, PWM_SLICE2};
 
+use core::f64::consts::TAU;
+use embassy_time::{Duration, Instant, Ticker};
+
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+
+/// Signal type used to talk to the LED handler
+pub type Signal = embassy_sync::signal::Signal<NoopRawMutex, Animation>;
+
+/// Description of a sine animation
+pub struct Animation {
+    pub color: (f64, f64, f64),
+    pub bounds: (f64, f64),
+    pub period: Duration,
+}
+
 // clock divider: 133Mhz / 256 ~= 500kHz
 const PWM_DIV: u8 = u8::MAX;
 
 // Period in ticks: 512 ticks -> 500kHz / 512 ~= 1kHz (i.e. 1PWM cycle ~= 1ms)
 const PWM_TOP: u16 = 512;
 
-// PWM channels for each pin, refer to RGB led pins here:
+// PWM slices for each pin, refer to RGB led pins here:
 //  https://shop.pimoroni.com/products/tiny-2040
-// and RP2040 datasheet PWM channels(4.5.2 Programmer's Model)
-pub struct LEDChannels {
+// and RP2040 datasheet PWM slices (4.5.2 Programmer's Model)
+pub struct LEDSlices {
     // GPIO 18 -> PWM 1A
     red: pwm::PwmOutput<'static>,
     // GPIO 19 -> PWM 1B
@@ -32,7 +47,7 @@ pub struct LEDChannels {
     blue: pwm::PwmOutput<'static>,
 }
 
-impl LEDChannels {
+impl LEDSlices {
     // NOTE: duty "on/off" is inverted because LEDs are active low
     // NOTE: we 'unwrap' because the error is actually Infallible
 
@@ -53,7 +68,7 @@ type LEDPins = (
 pub fn init_pwm(
     slices: (Peri<'static, PWM_SLICE1>, Peri<'static, PWM_SLICE2>),
     led_pins: LEDPins,
-) -> LEDChannels {
+) -> LEDSlices {
     // Configure PWM
     let (slice1, slice2) = slices;
 
@@ -73,5 +88,34 @@ pub fn init_pwm(
         .0
         .unwrap();
 
-    LEDChannels { red, green, blue }
+    LEDSlices { red, green, blue }
+}
+
+/// Animate the LEDs forever, updating the PWM slices every 50ms
+pub async fn animate_leds(signal: &Signal, mut led_slices: LEDSlices) {
+    // Update the LEDs every 50ms
+    let mut ticker = Ticker::every(Duration::from_millis(50));
+
+    let mut state = signal.wait().await; // Wait for the first value
+
+    loop {
+        if let Some(state_) = signal.try_take() {
+            // Update state if new animation was signaled
+            state = state_;
+        }
+
+        // How far we are in one blink (intensity follows a sine wave)
+        let theta = (Instant::now().as_millis() as f64 / state.period.as_millis() as f64) * TAU;
+        let (v_min, v_max) = state.bounds;
+        let intensity = (v_max - v_min) * (0.5 * libm::sin(theta) + 0.5) + v_min;
+
+        led_slices.set_rgb(
+            intensity * state.color.0,
+            intensity * state.color.1,
+            intensity * state.color.2,
+        );
+
+        // Wait some time before adjusting color
+        ticker.next().await;
+    }
 }
