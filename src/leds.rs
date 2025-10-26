@@ -35,10 +35,10 @@ const PWM_DIV: u8 = u8::MAX;
 // Period in ticks: 512 ticks -> 500kHz / 512 ~= 1kHz (i.e. 1PWM cycle ~= 1ms)
 const PWM_TOP: u16 = 512;
 
-// PWM channels for each pin, refer to RGB led pins here:
+// PWM slices for each pin, refer to RGB led pins here:
 //  https://shop.pimoroni.com/products/tiny-2040
-// and RP2040 datasheet PWM channels(4.5.2 Programmer's Model)
-pub struct LEDChannels {
+// and RP2040 datasheet PWM slices (4.5.2 Programmer's Model)
+pub struct LEDSlices {
     // GPIO 18 -> PWM 1A
     red: pwm::PwmOutput<'static>,
     // GPIO 19 -> PWM 1B
@@ -47,7 +47,7 @@ pub struct LEDChannels {
     blue: pwm::PwmOutput<'static>,
 }
 
-impl LEDChannels {
+impl LEDSlices {
     // NOTE: duty "on/off" is inverted because LEDs are active low
     // NOTE: we 'unwrap' because the error is actually Infallible
 
@@ -68,7 +68,7 @@ type LEDPins = (
 pub fn init_pwm(
     slices: (Peri<'static, PWM_SLICE1>, Peri<'static, PWM_SLICE2>),
     led_pins: LEDPins,
-) -> LEDChannels {
+) -> LEDSlices {
     // Configure PWM
     let (slice1, slice2) = slices;
 
@@ -88,11 +88,11 @@ pub fn init_pwm(
         .0
         .unwrap();
 
-    LEDChannels { red, green, blue }
+    LEDSlices { red, green, blue }
 }
 
 /// Animate the LEDs forever, updating the PWM slices every 50ms
-pub async fn animate_leds(signal: &Signal, mut led_channels: LEDChannels) {
+pub async fn animate_leds(signal: &Signal, mut led_slices: LEDSlices) {
     // Update the LEDs every 50ms
     let mut ticker = Ticker::every(Duration::from_millis(50));
 
@@ -109,7 +109,7 @@ pub async fn animate_leds(signal: &Signal, mut led_channels: LEDChannels) {
         let (v_min, v_max) = state.bounds;
         let intensity = (v_max - v_min) * (0.5 * libm::sin(theta) + 0.5) + v_min;
 
-        led_channels.set_rgb(
+        led_slices.set_rgb(
             intensity * state.color.0,
             intensity * state.color.1,
             intensity * state.color.2,

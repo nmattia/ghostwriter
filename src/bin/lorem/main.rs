@@ -83,14 +83,14 @@ async fn main(_spawner: Spawner) {
         signal_pin
     };
 
-    let led_channels = leds::init_pwm((p.PWM_SLICE1, p.PWM_SLICE2), (p.PIN_18, p.PIN_19, p.PIN_20));
+    let led_slices = leds::init_pwm((p.PWM_SLICE1, p.PWM_SLICE2), (p.PIN_18, p.PIN_19, p.PIN_20));
 
     let signal = leds::Signal::new();
     signal.signal(IDLE_ANIMATION);
 
     // Lorem-specific functions
     let handle_usb = handle_usb(&mut writer, signal_pin, &signal);
-    let handle_leds = leds::animate_leds(&signal, led_channels);
+    let handle_leds = leds::animate_leds(&signal, led_slices);
 
     // Run everything concurrently.
     // If we had made everything `'static` above instead, we could do this using separate tasks instead.

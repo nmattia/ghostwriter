@@ -79,10 +79,10 @@ async fn main(_spawner: Spawner) {
     // Enable the schmitt trigger to slightly debounce.
     signal_pin.set_schmitt(true);
 
-    let led_channels = leds::init_pwm((p.PWM_SLICE1, p.PWM_SLICE2), (p.PIN_18, p.PIN_19, p.PIN_20));
+    let led_slices = leds::init_pwm((p.PWM_SLICE1, p.PWM_SLICE2), (p.PIN_18, p.PIN_19, p.PIN_20));
     let signal = leds::Signal::new();
 
-    let leds_fut = leds::animate_leds(&signal, led_channels);
+    let leds_fut = leds::animate_leds(&signal, led_slices);
     let click_fut = click(&mut writer, signal_pin, &signal);
     let app_fut = join(click_fut, leds_fut);
 
