@@ -8,6 +8,7 @@ use {defmt_rtt as _, panic_probe as _};
 // USB Human Interface Device (HID) Class support
 use usbd_hid::descriptor::{KeyboardReport, SerializedDescriptor};
 
+use defmt::*;
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
 use embassy_rp::bind_interrupts;
@@ -99,8 +100,10 @@ const ENTER: KeyboardReport = KeyboardReport {
 
 async fn click<'a>(writer: &mut HidWriter<'a>, mut signal_pin: Input<'a>) {
     loop {
+        debug!("ghostwriter clicker waiting for press");
         signal_pin.wait_for_falling_edge().await;
 
+        debug!("ghostwriter clicker pressed, waiting for release");
         if embassy_time::with_timeout(
             Duration::from_millis(600),
             signal_pin.wait_for_rising_edge(),
@@ -108,17 +111,17 @@ async fn click<'a>(writer: &mut HidWriter<'a>, mut signal_pin: Input<'a>) {
         .await
         .is_err()
         {
+            debug!("ghostwriter clicker release timed out, ENTER");
             let _ = writer.write_serialize(&ENTER).await;
-            Timer::after(DELAY).await;
-            ghostwriter::keyboard::release_keys(writer).await;
-            // 1 sec debounce delay
-            Timer::after(Duration::from_secs(1)).await;
         } else {
+            debug!("ghostwriter clicker released, SPACE");
             let _ = writer.write_serialize(&SPACE).await;
-            Timer::after(DELAY).await;
-            ghostwriter::keyboard::release_keys(writer).await;
-            Timer::after(DELAY).await;
         }
+        Timer::after(DELAY).await;
+        ghostwriter::keyboard::release_keys(writer).await;
+        Timer::after(DELAY).await;
+
+        signal_pin.wait_for_high().await; // workaround for https://github.com/embassy-rs/embassy/issues/4790
     }
 }
 
