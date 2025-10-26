@@ -5,14 +5,8 @@
 
 use {defmt_rtt as _, panic_probe as _};
 
-// Locking
-use core::cell::RefCell;
-use critical_section::Mutex;
-
 // USB Human Interface Device (HID) Class support
 use usbd_hid::descriptor::{KeyboardReport, SerializedDescriptor};
-
-use core::f64::consts::TAU;
 
 use defmt::*;
 use embassy_executor::Spawner;
@@ -22,7 +16,7 @@ use embassy_rp::clocks::RoscRng;
 use embassy_rp::gpio::{Input, Pull};
 use embassy_rp::peripherals::USB;
 use embassy_rp::usb::{Driver, InterruptHandler};
-use embassy_time::{Duration, Instant, Ticker, Timer};
+use embassy_time::{Duration, /*Instant, Ticker, */ Timer};
 use embassy_usb::class::hid;
 
 use rand_distr::{ChiSquared, Distribution, Normal};
@@ -36,13 +30,6 @@ bind_interrupts!(struct Irqs {
 });
 
 type HidWriter<'a> = hid::HidWriter<'a, Driver<'a, USB>, 8>;
-
-// Whether we're typing or not
-#[derive(Clone, PartialEq, Eq)]
-enum State {
-    Typing,
-    Stopped,
-}
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
@@ -98,54 +85,36 @@ async fn main(_spawner: Spawner) {
 
     let led_channels = leds::init_pwm((p.PWM_SLICE1, p.PWM_SLICE2), (p.PIN_18, p.PIN_19, p.PIN_20));
 
-    // The global state (communication between LEDs & main loop)
-    let state: Mutex<RefCell<State>> = Mutex::new(RefCell::new(State::Stopped));
+    let signal = leds::Signal::new();
+    signal.signal(IDLE_ANIMATION);
 
     // Lorem-specific functions
-    let handle_usb = handle_usb(&mut writer, signal_pin, &state);
-    let handle_leds = handle_leds(&state, led_channels);
+    let handle_usb = handle_usb(&mut writer, signal_pin, &signal);
+    let handle_leds = leds::animate_leds(&signal, led_channels);
 
     // Run everything concurrently.
     // If we had made everything `'static` above instead, we could do this using separate tasks instead.
     join(usb_fut, join(handle_leds, handle_usb)).await;
 }
 
-/// Animate the LEDs based on the state
-async fn handle_leds(state: &Mutex<RefCell<State>>, mut led_channels: crate::leds::LEDChannels) {
-    let read_state = || critical_section::with(|cs| state.borrow(cs).borrow().clone());
-
-    // State specific data
+const IDLE_ANIMATION: leds::Animation = leds::Animation {
     #[allow(clippy::eq_op)]
-    let state_data = |state: &State| match state {
-        State::Typing => ((1.0 / 1.0, 1.0 / 9.0, 1.0 / 1.0), 0.0, 1.0, 1000.0),
-        State::Stopped => ((1.0 / 3.0, 1.0 / 5.0, 1.0 / 4.0), 0.3, 0.5, 2000.0),
-    };
+    color: (1.0 / 3.0, 1.0 / 5.0, 1.0 / 4.0),
+    bounds: (0.3, 0.8),
+    period: Duration::from_secs(2),
+};
 
-    // Update the LEDs every 50ms
-    let mut ticker = Ticker::every(Duration::from_millis(50));
-
-    loop {
-        let (color, v_min, v_max, period_millis) = state_data(&read_state());
-
-        // How far we are in one blink (intensity follows a sine wave)
-        let theta = (Instant::now().as_millis() as f64 / period_millis) * TAU;
-        let intensity = (v_max - v_min) * (0.5 * libm::sin(theta) + 0.5) + v_min;
-
-        led_channels.set_rgb(
-            intensity * color.0,
-            intensity * color.1,
-            intensity * color.2,
-        );
-
-        // Wait some time before adjusting color
-        ticker.next().await;
-    }
-}
+const TYPING_ANIMATION: leds::Animation = leds::Animation {
+    #[allow(clippy::eq_op)]
+    color: (1.0 / 1.0, 1.0 / 9.0, 1.0 / 1.0),
+    bounds: (0.0, 1.0),
+    period: Duration::from_secs(1),
+};
 
 async fn handle_usb<'a>(
     writer: &mut HidWriter<'a>,
     mut signal_pin: Input<'a>,
-    state: &Mutex<RefCell<State>>,
+    signal: &leds::Signal,
 ) {
     let mut n_written: usize = 0;
 
@@ -162,7 +131,7 @@ async fn handle_usb<'a>(
         debug!("ghostwriter received click");
 
         // Button was pressed, so notify the LEDs
-        critical_section::with(|cs| state.borrow(cs).replace(State::Typing));
+        signal.signal(TYPING_ANIMATION);
 
         // Write chars forever (until interrupted)
         let write = async {
@@ -188,7 +157,7 @@ async fn handle_usb<'a>(
 
         // Button was pressed, so release all keys in the keyboard and notify the LEDs
         ghostwriter::keyboard::release_keys(writer).await;
-        critical_section::with(|cs| state.borrow(cs).replace(State::Stopped));
         debug!("ghostwriter output stopped");
+        signal.signal(IDLE_ANIMATION);
     }
 }
