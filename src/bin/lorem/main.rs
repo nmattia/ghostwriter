@@ -16,7 +16,7 @@ use embassy_rp::clocks::RoscRng;
 use embassy_rp::gpio::{Input, Pull};
 use embassy_rp::peripherals::USB;
 use embassy_rp::usb::{Driver, InterruptHandler};
-use embassy_time::{Duration, /*Instant, Ticker, */ Timer};
+use embassy_time::{Duration, Timer};
 use embassy_usb::class::hid;
 
 use rand_distr::{ChiSquared, Distribution, Normal};
