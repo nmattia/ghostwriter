@@ -17,26 +17,9 @@ jobs:
           cargo test --target "$(rustc -vV | grep host | awk '{ print $2; }')" -p twine
 
       - uses: ./.github/actions/picotool
-      - run: cp ./target/thumbv6m-none-eabi/release/lorem lorem.elf
-      - run: picotool uf2 convert ./lorem.elf lorem.uf2
-      - uses: actions/upload-artifact@v4
+      - uses: ./.github/actions/upload-firmware
         with:
-          name: lorem.uf2
-          path: ./lorem.uf2
-
-      - uses: actions/upload-artifact@v4
+          bin: lorem
+      - uses: ./.github/actions/upload-firmware
         with:
-          name: lorem.elf
-          path: ./lorem.elf
-
-      - run: cp ./target/thumbv6m-none-eabi/release/cyoa cyoa.elf
-      - run: picotool uf2 convert ./cyoa.elf cyoa.uf2
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cyoa.uf2
-          path: ./cyoa.uf2
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cyoa.elf
-          path: ./cyoa.elf
+          bin: cyoa
