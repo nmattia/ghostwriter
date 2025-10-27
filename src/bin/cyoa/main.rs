@@ -20,6 +20,7 @@ use embassy_usb::class::hid;
 use embassy_usb::{Builder, Config};
 
 use ghostwriter::keyboard::write_str;
+use ghostwriter::leds;
 
 const STORY: &str = include_str!("ghostwriter.html");
 
@@ -75,17 +76,21 @@ async fn main(_spawner: Spawner) {
     // Run the USB device.
     let usb_fut = usb.run();
 
+    let led_slices = leds::init_pwm((p.PWM_SLICE1, p.PWM_SLICE2), (p.PIN_18, p.PIN_19, p.PIN_20));
+
+    let leds_signal = leds::Signal::new();
+    let leds_fut = leds::animate_leds(&leds_signal, led_slices);
+
     // Set up the signal pin that will be used to trigger the keyboard.
     let mut signal_pin = Input::new(p.PIN_23, Pull::None);
 
     // Enable the schmitt trigger to slightly debounce.
     signal_pin.set_schmitt(true);
 
-    let play_fut = play(&mut writer, signal_pin);
+    let play_fut = play(&mut writer, signal_pin, &leds_signal);
+    let app_fut = join(play_fut, leds_fut);
 
-    // Run everything concurrently.
-    // If we had made everything `'static` above instead, we could do this using separate tasks instead.
-    join(usb_fut, play_fut).await;
+    join(usb_fut, app_fut).await;
 }
 
 const SHIFT: KeyboardReport = KeyboardReport {
@@ -131,7 +136,29 @@ const SPACE: KeyboardReport = KeyboardReport {
     keycodes: [44, 0, 0, 0, 0, 0],
 };
 
-async fn play<'a>(writer: &mut HidWriter<'a>, mut signal_pin: Input<'a>) {
+/// Short press, going through menus
+const PRESSED_ANIMATION: leds::Animation = leds::Animation {
+    #[allow(clippy::eq_op)]
+    color: (1.0 / 3.0, 1.0 / 5.0, 1.0 / 4.0),
+    bounds: (0.3, 1.0),
+    peak_after: Duration::from_millis(200),
+    loop_after: None,
+};
+
+/// The ghostwriter is typing
+const TYPING_ANIMATION: leds::Animation = leds::Animation {
+    #[allow(clippy::eq_op)]
+    color: (1.0 / 1.0, 1.0 / 9.0, 1.0 / 1.0),
+    bounds: (0.0, 1.0),
+    peak_after: Duration::from_millis(100),
+    loop_after: Some(Duration::from_millis(400)),
+};
+
+async fn play<'a>(
+    writer: &mut HidWriter<'a>,
+    mut signal_pin: Input<'a>,
+    leds_signal: &leds::Signal,
+) {
     let start_passage_id = twine::find_start_passage_id(STORY);
 
     let mut passage = twine::find_passage_text_by_id(STORY, start_passage_id);
@@ -145,11 +172,13 @@ async fn play<'a>(writer: &mut HidWriter<'a>, mut signal_pin: Input<'a>) {
             Some(l) => l,
         };
 
+        leds_signal.signal(TYPING_ANIMATION);
+
         // If a link is found, write the passage until the link
         write_str(writer, &passage[..link_section_start], DELAY).await;
 
         // Then offer the next passage selection
-        let res = select_passage_link(writer, &mut signal_pin, passage).await;
+        let res = select_passage_link(writer, &mut signal_pin, leds_signal, passage).await;
         passage = twine::find_passage_text_by_name(STORY, res);
     }
 }
@@ -159,6 +188,7 @@ const DELAY: Duration = Duration::from_millis(30);
 async fn select_passage_link<'a>(
     writer: &mut HidWriter<'a>,
     signal_pin: &mut Input<'a>,
+    leds_signal: &leds::Signal,
     link_section: &'a str,
 ) -> &'a str {
     let n_links = twine::get_n_links(link_section);
@@ -214,8 +244,11 @@ async fn select_passage_link<'a>(
     let mut target = 0;
     let mut current = 0;
 
+    leds_signal.signal(PRESSED_ANIMATION); // basically stop the typing animation
     loop {
         signal_pin.wait_for_falling_edge().await;
+
+        leds_signal.signal(PRESSED_ANIMATION);
 
         if embassy_time::with_timeout(
             Duration::from_millis(600),
