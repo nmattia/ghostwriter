@@ -3,8 +3,17 @@ description: 'Installs the picotool executable from raspberry/picotool.'
 runs:
   using: "composite"
   steps:
+
+    - name: Cache picotool
+      id: cache-picotool
+      uses: actions/cache@v4
+      with:
+        path: /usr/local/bin/picotool
+        key: ${{ runner.os }} # we (currently) hardcode the version so no need to get fancy
+
     # Check out the SDK (used by picotool)
     - name: Checkout pico-sdk
+      if: steps.cache-picotool.outputs.cache-hit != 'true'
       uses: actions/checkout@v4
       with:
         repository: raspberrypi/pico-sdk
@@ -13,25 +22,29 @@ runs:
 
     # Check out picotool itself
     - name: Checkout picotool
+      if: steps.cache-picotool.outputs.cache-hit != 'true'
       uses: actions/checkout@v4
       with:
         repository: raspberrypi/picotool
         path: picotool
         ref: 25aa087b2c517b4901874a99536e869d4d27b678
 
-    # Make sure we have cmake etc
-    - name: Install build dependencies
-      run: sudo apt install -y build-essential pkg-config libusb-1.0-0-dev cmake
-      shell: bash
-
     # Build and install
     - name: Build picotool
+      if: steps.cache-picotool.outputs.cache-hit != 'true'
       run: |
         export PICO_SDK_PATH=$GITHUB_WORKSPACE/pico-sdk
         cd $GITHUB_WORKSPACE/picotool
         mkdir build
         cd build
-        cmake ..
+        # build picotool without usb support: we don't
+        # need usb support and it would add a system
+        # dependency.
+        PICOTOOL_NO_LIBUSB=1 cmake ..
         make
         sudo make install
+      shell: bash
+
+    - name: Run picotool
+      run: picotool version
       shell: bash
