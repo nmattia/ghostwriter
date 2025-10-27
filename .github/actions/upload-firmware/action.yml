@@ -1,0 +1,23 @@
+name: 'Upload firmware'
+description: 'Make the given Rust bin available as an artifact'
+inputs:
+  bin:
+    description: 'Rust binary name'
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      run: |
+        cp './target/thumbv6m-none-eabi/release/${{ inputs.bin }}' '${{ inputs.bin }}.elf'
+        picotool uf2 convert './${{ inputs.bin }}.elf' '${{ inputs.bin }}.uf2'
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.bin }}.uf2
+        path: ./${{ inputs.bin }}.uf2
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.bin }}.elf
+        path: ./${{ inputs.bin }}.elf
