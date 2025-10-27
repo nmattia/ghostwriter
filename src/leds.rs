@@ -14,7 +14,6 @@ use embassy_rp::Peri;
 
 use embassy_rp::peripherals::{PIN_18, PIN_19, PIN_20, PWM_SLICE1, PWM_SLICE2};
 
-use core::f64::consts::TAU;
 use embassy_time::{Duration, Instant, Ticker};
 
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
@@ -26,7 +25,10 @@ pub type Signal = embassy_sync::signal::Signal<NoopRawMutex, Animation>;
 pub struct Animation {
     pub color: (f64, f64, f64),
     pub bounds: (f64, f64),
-    pub period: Duration,
+    /// Peak time (b parameter)
+    pub peak_after: Duration,
+    /// If None, tail off and never loop.
+    pub loop_after: Option<Duration>,
 }
 
 // clock divider: 133Mhz / 256 ~= 500kHz
@@ -92,22 +94,40 @@ pub fn init_pwm(
 }
 
 /// Animate the LEDs forever, updating the PWM slices every 50ms
+/// This uses a pulse-y function that adds more personality to the ghost
+/// than eg a simple sine wave.
 pub async fn animate_leds(signal: &Signal, mut led_slices: LEDSlices) {
     // Update the LEDs every 50ms
     let mut ticker = Ticker::every(Duration::from_millis(50));
 
     let mut state = signal.wait().await; // Wait for the first value
+    let mut start_at = Instant::now();
 
     loop {
         if let Some(state_) = signal.try_take() {
-            // Update state if new animation was signaled
+            // Update state and restart time if new animation was signaled
             state = state_;
+            start_at = Instant::now();
         }
 
-        // How far we are in one blink (intensity follows a sine wave)
-        let theta = (Instant::now().as_millis() as f64 / state.period.as_millis() as f64) * TAU;
+        // elapsed time since animation started
+        // (can _technically_ overflow but very very unlikely)
+        let mut dt = (Instant::now() - start_at).as_millis() as f64;
+        if let Some(loop_after) = state.loop_after {
+            // If we're looping, then restart the time
+            dt %= loop_after.as_millis() as f64;
+        }
         let (v_min, v_max) = state.bounds;
-        let intensity = (v_max - v_min) * (0.5 * libm::sin(theta) + 0.5) + v_min;
+
+        // Parameters of the equation M * (x/b) * exp(1 - x/b)
+        // which represents a pulse from 0 peaking at height M at time b
+        #[allow(non_snake_case)]
+        let M = v_max - v_min; // amplitude
+        let b = state.peak_after.as_millis() as f64;
+        let y = M * (dt / b) * libm::exp(1. - (dt / b));
+
+        // add v_min back
+        let intensity = v_min + y;
 
         led_slices.set_rgb(
             intensity * state.color.0,

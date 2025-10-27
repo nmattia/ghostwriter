@@ -104,34 +104,30 @@ const ENTER: KeyboardReport = KeyboardReport {
     keycodes: [40, 0, 0, 0, 0, 0],
 };
 
-/// Waiting for user input
-const IDLE_ANIMATION: leds::Animation = leds::Animation {
-    #[allow(clippy::eq_op)]
-    color: (1.0 / 3.0, 1.0 / 5.0, 1.0 / 4.0),
-    bounds: (0.3, 0.8),
-    period: Duration::from_secs(2),
-};
-
-/// Pressed, waiting to see if short or long
+/// Short press
 const PRESSED_ANIMATION: leds::Animation = leds::Animation {
     #[allow(clippy::eq_op)]
     color: (1.0 / 1.0, 1.0 / 9.0, 1.0 / 1.0),
-    bounds: (0.0, 1.0),
-    period: Duration::from_secs(1),
+    bounds: (0.3, 0.7),
+    peak_after: Duration::from_millis(200),
+    loop_after: None,
 };
 
 /// Pressed timed out, enter was sent
+/// This will tail off and is the "default" state after a selection (ENTER)
+/// was made.
 const ENTER_TRIGGERED_ANIMATION: leds::Animation = leds::Animation {
     #[allow(clippy::eq_op)]
     color: (1.0 / 1.0, 5.0 / 9.0, 0.3 / 1.0),
-    bounds: (1.0, 1.0),
-    period: Duration::from_secs(1), /* doesn't matter since bounds at the same */
+    bounds: (0.3, 1.),
+    peak_after: Duration::from_millis(200), // doesn't matter
+    loop_after: None,
 };
 
 async fn click<'a>(writer: &mut HidWriter<'a>, mut signal_pin: Input<'a>, signal: &leds::Signal) {
+    signal.signal(ENTER_TRIGGERED_ANIMATION);
     loop {
         debug!("ghostwriter clicker waiting for press");
-        signal.signal(IDLE_ANIMATION);
         signal_pin.wait_for_falling_edge().await;
 
         debug!("ghostwriter clicker pressed, waiting for release");
