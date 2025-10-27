@@ -23,3 +23,6 @@ jobs:
       - uses: ./.github/actions/upload-firmware
         with:
           bin: cyoa
+      - uses: ./.github/actions/upload-firmware
+        with:
+          bin: clicker
