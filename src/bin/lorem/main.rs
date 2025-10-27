@@ -101,14 +101,16 @@ const IDLE_ANIMATION: leds::Animation = leds::Animation {
     #[allow(clippy::eq_op)]
     color: (1.0 / 3.0, 1.0 / 5.0, 1.0 / 4.0),
     bounds: (0.3, 0.8),
-    period: Duration::from_secs(2),
+    peak_after: Duration::from_millis(500),
+    loop_after: Some(Duration::from_secs(2)),
 };
 
 const TYPING_ANIMATION: leds::Animation = leds::Animation {
     #[allow(clippy::eq_op)]
     color: (1.0 / 1.0, 1.0 / 9.0, 1.0 / 1.0),
     bounds: (0.0, 1.0),
-    period: Duration::from_secs(1),
+    peak_after: Duration::from_millis(100),
+    loop_after: Some(Duration::from_millis(400)),
 };
 
 async fn handle_usb<'a>(
