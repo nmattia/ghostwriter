@@ -1,0 +1,65 @@
+# Simple workflow for deploying static content to GitHub Pages
+# Adapted from https://github.com/actions/deploy-pages/blob/b74272834adc04f971da4b0b055c49fa8d7f90c9/README.md#usage
+name: Deploy static content to Pages
+
+on:
+  # Runs on pushes
+  push:
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
+# However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  # Build the app & lib and save as artifacts
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build with tweego # tweego is necessary to compile the twine archive into an HTML document
+        run: |
+          dist_dir="$PWD/dist"
+          tweego_dir="$(mktemp -d)"
+          # we perform the build in the tweego download dir because it needs the 'storyformats' dir unpacked
+          # from the archive
+          cp ./src/bin/cyoa/ghostwriter.html "$tweego_dir"/ghostwriter.html
+          cd "$tweego_dir"
+          curl -LO https://github.com/tmedwards/tweego/releases/download/v2.1.1/tweego-2.1.1-linux-x64.zip
+          unzip ./tweego-2.1.1-linux-x64.zip
+          rm ./tweego-2.1.1-linux-x64.zip
+          chmod +x ./tweego
+          mkdir -p "$dist_dir"
+          # the file lists a format (3.2+) that is newer than what tweego knows about, which makes it fail.
+          # So here we reassure it it's ok to use what it knows as "harlowe 3" instead.
+          ./tweego --format=harlowe-3 ./ghostwriter.html > "$dist_dir"/index.html
+
+      - name: Upload pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './dist'
+
+
+  # Single deploy job since we're just deploying
+  deploy:
+    needs: build
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
