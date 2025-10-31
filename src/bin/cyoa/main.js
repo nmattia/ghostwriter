@@ -15,20 +15,3 @@ document.body.onkeydown = function(e) {
         nxt.focus();
     }
 }
-
-// Focus the first link every time a new passage is rendered (Harlowe)
-const target = document.querySelector("tw-story");
-
-const focus = () => {
-    const firstLink = document.querySelector("tw-link");
-    if (firstLink) {
-        firstLink.focus();
-    }
-}
-
-const observer = new MutationObserver(() => {
-    // Defer a tick so Harlowe has time to render fully
-    setTimeout(() => focus(), 0);
-});
-
-observer.observe(target, { childList: true });
