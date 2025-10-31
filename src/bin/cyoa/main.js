@@ -14,4 +14,16 @@ document.body.onkeydown = function(e) {
         const nxt = links[ixNxt];
         nxt.focus();
     }
+
+    // handle "r" for restart
+    if (e.key === "r" || e.key === "R") {
+        e.preventDefault();
+        try {
+            const key = "Saved Session"; // found in browser storage
+            sessionStorage.removeItem(key);
+        } catch (err) {
+            console.warn("Could not clear Harlowe session storage:", err);
+        }
+        location.reload();
+    }
 }
