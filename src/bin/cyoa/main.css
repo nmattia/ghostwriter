@@ -1,0 +1,10 @@
+body {
+    background-color: black;
+}
+
+tw-story {
+    max-width: 900px;
+    margin: auto;
+    padding: 1em; /* override default styles */
+    padding-top: 2em;
+}
